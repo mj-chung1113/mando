@@ -47,10 +47,10 @@ class pure_pursuit:
         self.min_lfd = 10
         self.max_lfd = 50
         self.lfd_gain = 0.5
-        self.target_velocity = 25  # 수정 필요 
+        self.target_velocity = 25  #차량의 한계속도. 수정 필요, 구간에 따라 동적으로 조절할 예정 
 
         self.pid = pidControl()
-        self.vel_planning = velocityPlanning(self.target_velocity/3.6, 0.5)
+        self.vel_planning = velocityPlanning(self.target_velocity/3.6, 0.5) #3.6을 나누는 이유는, 로스에서는 m/s단위로 사용,우리는 km/h쓰니깐 단위변환하려고..
         while True:
             if self.is_global_path:
                 self.velocity_list = self.vel_planning.curvedBaseVelocity(self.path, 50)
@@ -62,7 +62,7 @@ class pure_pursuit:
         while not rospy.is_shutdown():
             if self.is_path and self.is_odom and self.is_status:
                 prev_time = time.time()
-                if self.ego_vehicle_status.velocity.x * 3.6 <= 15:
+                if self.ego_vehicle_status.velocity.x * 3.6 <= 15: 
                     # Pure Pursuit 사용
                     steering = self.calc_pure_pursuit()
                 else:
@@ -166,14 +166,14 @@ class pure_pursuit:
         steering = atan2((2 * self.vehicle_length * sin(theta)), self.lfd)
 
         return steering
-
+    #추가된 파트 (0912) 스탠리는 동적 모델이 적용되는 조금 더 빠른 속도에서 pure pursuit보다 유리하다는 평이 많아 추가함. 
+    #15키로 이하에서 pure pursuit, 초과할 경우 stanley를 사용하려구 함. 지욱이형이 잘 깎아주삼 
     def calc_stanley(self):
         # Stanley 제어 알고리즘을 사용하여 steering 각도를 계산합니다.
-        # 필요한 매개변수 및 계산식을 여기에 추가합니다.
-        # 여기에 필요한 매개변수 및 계산식을 추가합니다.
-        # 예를 들어:
         
-        k = 0.3  # steering gain
+        k = 0.3  # steering gain 클수록 급하게 꺾기가 가능, 작을수록 완만하고 안정적으로 꺾음. 
+        # 이거를 상수가 아닌 변수로 두는 방법이 좋을 것같아. 도로 곡률이 클 수록 크게, 속도가 빠를 수록 작게.. 동적으로 조절할 수 있도록 하면 좋을듯 
+        
         self.is_look_forward_point = False
 
         # 좌표 변환 행렬 생성

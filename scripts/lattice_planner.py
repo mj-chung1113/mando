@@ -55,8 +55,9 @@ class LatticePlanner:
         self.checkObject_dis = 2.5
         self.lane_weight_distance = 2.6
 
-        rate = rospy.Rate(30)  # 30hz
+        rate = rospy.Rate(30)  # 30hz 로 동작하는 코드임
 
+        #메인 로직 구문 
         while not rospy.is_shutdown():
             if self.is_path and self.is_odom and self.is_obj: #콜백 함수들 돌아가고 있으면
                 if self.checkObject(self.local_path, self.object_points):
@@ -67,18 +68,18 @@ class LatticePlanner:
                     self.lattice_path_pub.publish(self.local_path)
                     
             rate.sleep()
-
+    #local_path 위에 장애물(라이다로 감지)이 있는 지 확인하는 함수 
     def checkObject(self, ref_path, object_points):
         is_crash = False
         for point in object_points:
             for path in ref_path.poses:
                 dis = sqrt(pow(path.pose.position.x - point[0], 2) + pow(path.pose.position.y - point[1], 2))
-                if dis < self.checkObject_dis:  # 장애물의 좌표값이 지역 경로 상의 좌표값과의 직선거리가 2.35 미만일 때 충돌이라 판단
-                    # dis < 2.35 에서 2.35보다 크게 설정하면 경로와 장애물 사이의 거리를 더 멀게 설정
+                if dis < self.checkObject_dis:  # 장애물의 좌표값이 지역 경로 상의 좌표값과의 직선거리가 self.checkObject_dis 미만일 때 충돌이라 판단
+                    # dis < checkobject_dis
                     is_crash = True
                     break
         return is_crash
-
+    #생성될 후보 lattice_path 들과 장애물과의 거리를 계산해 가중치를 부여하는 함수 
     def collision_check(self, object_points, out_path):
         selected_lane = 12
         self.lane_weight = [ 4, 3, 2, 1, 1, 2, 3, 4 ]
@@ -114,12 +115,13 @@ class LatticePlanner:
             rospy.loginfo(f"Lane {i} weight: {weight}")        
         selected_lane = self.lane_weight.index(min(self.lane_weight))
         return selected_lane
-
+    #local_path 받아오는 콜백함수 
     def local_path_callback(self, msg):
         self.is_path = True
         self.local_path = msg
         rospy.loginfo("Local path received and stored. is_path = True")
-
+    
+    #gps,imu를 통해 구해진 odom (내 차량의 좌표 등등)받아오는 콜백함수 
     def odom_callback(self, msg):
         self.is_odom = True
         self.odom_msg = msg
@@ -148,6 +150,7 @@ class LatticePlanner:
         #if len(self.object_points) > 0:
             #rospy.loginfo(f"First obstacle point (absolute): x={self.object_points[0][0]}, y={self.object_points[0][1]}, z={self.object_points[0][2]}")
     
+    #안쓰지만 나중에 쓸지도 
     def head_check(self):
         """
         클러스터된 장애물 전방 존재 여부 체크 
@@ -164,7 +167,8 @@ class LatticePlanner:
 
         rospy.loginfo("장애물이 지정된 범위 내에 없습니다.")
         return False
-
+    
+    #라이다로 감지된 상대좌표인 장애물 좌표를 절대좌표로 변환하는 함수 
     def relative_to_absolute(self, rel_x, rel_y, rel_z):
         """
         장애물의 상대 좌표를 절대 좌표로 변환합니다.
@@ -190,6 +194,7 @@ class LatticePlanner:
         #rospy.loginfo(f"Converted relative position ({rel_x}, {rel_y}, {rel_z}) to absolute position ({abs_x}, {abs_y}, {abs_z}) with heading {heading}")
         return abs_x, abs_y, abs_z
 
+    #핵심코드, lattice_path를 생성하는 로직. 양쪽 총 8개의 후보 path를 생성하는 과정임. 
     def latticePlanner(self, ref_path, vehicle_status):
         out_path = []
 
@@ -241,7 +246,7 @@ class LatticePlanner:
             lattice_path.header.frame_id = 'map'
             x = []
             y = []
-            x_interval = 0.25
+            x_interval = 0.25 #path를 이루는 점들 사이의 간격 (커질 수록 앞(x)축 방향으로 간격이 넓어지고, 작아질수록 촘촘)
             xs = 0
             xf = end_point[0]
             ps = local_ego_vehicle_position[1][0]
@@ -251,6 +256,7 @@ class LatticePlanner:
             for i in range(xs, int(x_num)):
                 x.append(i * x_interval)
 
+            #path가 될 3차함수의 모양을 결정
             a = [0.0, 0.0, 0.0, 0.0]
             a[0] = ps
             a[1] = 0
@@ -278,7 +284,7 @@ class LatticePlanner:
             out_path.append(lattice_path)
                        
         return out_path
-
+    #안쓰지만 필요할지도 
     def generate_local_path(self, vehicle_status):
         """
         Generates a local path starting from (0, 0, 0) and extending straight along the x-axis.
