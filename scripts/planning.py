@@ -17,7 +17,7 @@ class planning :
         self.global_path_msg.header.frame_id='/map'
         
         self.is_odom=False
-        self.local_path_size=50
+        self.local_path_size=70
 
         rospack=rospkg.RosPack()
         pkg_path=rospack.get_path('mando')

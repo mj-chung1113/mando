@@ -14,19 +14,17 @@ class SCANCluster:
     def __init__(self):
         rospy.init_node('velodyne_clustering', anonymous=True)
         self.scan_sub = rospy.Subscriber("/velodyne_points", PointCloud2, self.callback)
-        
-
         self.clusterpoints_pub = rospy.Publisher("/cluster_points", PointCloud2, queue_size=10)
         self.pc_np = None
-        
 
     def callback(self, msg):
         self.pc_np = self.pointcloud2_to_xyz(msg)
         if len(self.pc_np) == 0:
             return
-        # RANSAC을 통해 평면상의 포인트들을 제거
-        #self.pc_np = self.apply_ransac(self.pc_np)
-
+        
+        # 모든 포인트의 Z 좌표를 -0.5로 설정
+        self.pc_np[:, 2] = -1.3
+        
         # 거리별로 클러스터링 수행
         cluster_points = []
         for dist_range, params in self.get_dbscan_params_by_distance().items():
@@ -48,33 +46,39 @@ class SCANCluster:
 
         self.publish_point_cloud(cluster_points)
 
-    def mission_callback(self, msg):
-        self.mission_info = msg
-    
-    # def apply_ransac(self, points):
-    #     """
-    #     RANSAC 알고리즘을 사용하여 평면상의 포인트들을 제거합니다.
-    #     """
-    #     X = points[:, :3]  # x, y, z 좌표
-    #     ransac = RANSACRegressor(residual_threshold=0.05)
-    #     ransac.fit(X[:, :2], X[:, 2])  # x, y를 독립 변수, z를 종속 변수로 사용
-    #     inlier_mask = ransac.inlier_mask_
+    def remove_floor_plane(self, points):
+        """
+        RANSAC을 사용하여 바닥 평면을 제거합니다.
+        """
+        X = points[:, :3]  # x, y, z 좌표
+        z_values = X[:, 2]
 
-    #     # 인라이어(평면에 속하는 포인트들)를 제거하고 아웃라이어만 반환
-    #     filtered_points = points[~inlier_mask]
-    #     return filtered_points
+        # 바닥 평면을 고려할 Z-값 범위
+        z_min = -1.36
+        z_max = -1.28
+
+        # Z-값이 범위 내에 있는 포인트만 필터링
+        floor_points = X[(z_values >= z_min) & (z_values <= z_max)]
+
+        # RANSAC 적용
+        ransac = RANSACRegressor(residual_threshold=0.05)
+        ransac.fit(floor_points[:, :2], floor_points[:, 2])  # x, y를 독립 변수, z를 종속 변수로 사용
+        inlier_mask = ransac.inlier_mask_
+
+        # 바닥 평면에 해당하는 포인트를 제외하고 나머지 포인트 반환
+        filtered_points = points[~(np.isin(np.arange(len(points)), np.where((z_values >= z_min) & (z_values <= z_max))[0]))]
+        return filtered_points
 
     def get_dbscan_params_by_distance(self):
         """
         거리 범위에 따라 DBSCAN의 eps와 min_samples 파라미터를 설정합니다.
         """
         return {
-                (0, 5): {'eps': 0.15, 'min_samples': 30},
-                (0, 10): {'eps': 0.2, 'min_samples': 25},  # 0m ~ 10m 거리
-                (10, 15): {'eps': 0.3, 'min_samples': 20},
-                (0, 20): {'eps': 0.45, 'min_samples': 15},  # 10m ~ 20m 거리
+                (0, 10): {'eps': 0.1, 'min_samples': 20},
+                (10, 30): {'eps': 0.3, 'min_samples': 10},
+                (30, 50): {'eps': 0.45, 'min_samples': 7},
+                
             }
-
 
     def publish_point_cloud(self, points):
         header = Header()
@@ -100,8 +104,8 @@ class SCANCluster:
             angle = np.arctan2(point[1], point[0])
             
             # point[0] = x / point[1] = y / point[2] = z
-            if -1< point[0] < 30 and -6 < point[1] < 6 and (dist < 50 ) and (-1.3 < point[2] < 0):
-                    point_list.append((point[0], point[1], point[2], point[3], dist, angle))
+            if -1 < point[0] < 70 and -3 < point[1] < 3 and (dist < 70) and (-1.33 < point[2] < 0.2):
+                point_list.append((point[0], point[1], point[2], point[3], dist, angle))
             
         point_np = np.array(point_list, np.float32)
         return point_np

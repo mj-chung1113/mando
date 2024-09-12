@@ -32,11 +32,11 @@ class LatticePlanner:
         self.lattice_path = None
         self.is_odom=False
 
-        self.index = 30  # 경로 생성 끝점
+        self.index = 35  # 경로 생성 끝점
 
-        base_offset = 1.5 * 0.3 * 20  # 인덱스 1당 30cm의 증가율 적용
+        base_offset = 1.6 * 0.3 * 20  # 인덱스 1당 30cm의 증가율 적용
 
-        self.lane_weight = [ 4, 3, 2, 1, 1, 2, 3,4 ]
+        self.lane_weight = [ 4, 3, 2, 1, 1, 2, 3, 4 ]
 
         offset_steps = 10
         step_size = base_offset * 2 / offset_steps
@@ -44,10 +44,10 @@ class LatticePlanner:
         self.lane_off_set = [
             -1*base_offset,
             -1*base_offset + step_size * 1.5,
-            -1*base_offset + step_size * 2.75,
-            -1*base_offset + step_size * 4,
-            base_offset - (step_size * 4),
-            base_offset - (step_size * 2.75),
+            -1*base_offset + step_size * 2.5,
+            -1*base_offset + step_size * 3.5,
+            base_offset - (step_size * 3.5),
+            base_offset - (step_size * 2.5),
             base_offset - (step_size * 1.5),
             base_offset,
         ]
@@ -67,23 +67,6 @@ class LatticePlanner:
                     self.lattice_path_pub.publish(self.local_path)
                     
             rate.sleep()
-    '''
-    def mission_callback(self, msg):
-        # 정적장애물 미션 시작
-        if msg.mission_num == 2 and not self.is_1st_lattice_started:
-            self.is_1st_lattice_started = True
-        # 정적장애물 미션 끝
-        elif msg.mission_num != 2 and self.is_1st_lattice_started:
-            self.is_1st_lattice_started = False
-        
-        # GPS 음영 미션 시작
-        elif msg.mission_num == 3 and not self.is_2nd_lattice_started:
-            self.is_2nd_lattice_started = True
-
-        # gps음영 미션 끝
-        elif msg.mission_num != 3 and self.is_2nd_lattice_started:
-            self.is_2nd_lattice_started = False
-    '''
 
     def checkObject(self, ref_path, object_points):
         is_crash = False
@@ -105,13 +88,13 @@ class LatticePlanner:
                 for path_pos in out_path[path_num].poses:
                     dis = sqrt(pow(point[0] - path_pos.pose.position.x, 2) + pow(point[1] - path_pos.pose.position.y, 2))
                     
-                    if  2.5 < dis < 3.0:
+                    if  2.8 < dis < 3.5:
                         self.lane_weight[path_num] += 1
-                    elif 2.2 < dis < 2.5 :
+                    elif 2.4 < dis < 2.8 :
                         self.lane_weight[path_num] += 2
-                    elif  1.9 < dis < 2.2:
+                    elif  2.0 < dis < 2.4:
                         self.lane_weight[path_num] += 4
-                    elif  1.7 < dis < 1.9:
+                    elif  1.7 < dis < 2.0:
                         self.lane_weight[path_num] += 7
                     elif  1.5 < dis < 1.7:
                         self.lane_weight[path_num] += 10
@@ -258,7 +241,7 @@ class LatticePlanner:
             lattice_path.header.frame_id = 'map'
             x = []
             y = []
-            x_interval = 0.20
+            x_interval = 0.25
             xs = 0
             xf = end_point[0]
             ps = local_ego_vehicle_position[1][0]
