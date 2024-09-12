@@ -22,8 +22,8 @@ class SCANCluster:
         if len(self.pc_np) == 0:
             return
         
-        # 모든 포인트의 Z 좌표를 -0.5로 설정
-        self.pc_np[:, 2] = -1.3
+        # 모든 포인트의 Z 좌표를 -1.4로 설정
+        self.pc_np[:, 2] = -1.4
         
         # 거리별로 클러스터링 수행
         cluster_points = []
@@ -104,7 +104,7 @@ class SCANCluster:
             angle = np.arctan2(point[1], point[0])
             
             # point[0] = x / point[1] = y / point[2] = z
-            if -1 < point[0] < 70 and -3 < point[1] < 3 and (dist < 70) and (-1.33 < point[2] < 0.2):
+            if -1 < point[0] < 60 and -3 < point[1] < 3 and (dist < 60) and (-1.43 < point[2] < 0.2):
                 point_list.append((point[0], point[1], point[2], point[3], dist, angle))
             
         point_np = np.array(point_list, np.float32)
