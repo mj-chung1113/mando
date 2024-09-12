@@ -8,18 +8,17 @@ from sensor_msgs.msg import PointCloud2, PointField
 from std_msgs.msg import Header
 import sensor_msgs.point_cloud2 as pc2
 from sklearn.cluster import DBSCAN
-from kurrier.msg import mission  # 사용자 정의 메시지 임포트
 from sklearn.linear_model import RANSACRegressor
 
 class SCANCluster:
     def __init__(self):
         rospy.init_node('velodyne_clustering', anonymous=True)
         self.scan_sub = rospy.Subscriber("/velodyne_points", PointCloud2, self.callback)
-        rospy.Subscriber("/mission", mission, self.mission_callback)
+        
 
         self.clusterpoints_pub = rospy.Publisher("/cluster_points", PointCloud2, queue_size=10)
         self.pc_np = None
-        self.mission_info = mission()
+        
 
     def callback(self, msg):
         self.pc_np = self.pointcloud2_to_xyz(msg)
@@ -69,16 +68,7 @@ class SCANCluster:
         """
         거리 범위에 따라 DBSCAN의 eps와 min_samples 파라미터를 설정합니다.
         """
-        if self.mission_info.mission_num == 4:
-            return {
-                (0, 5): {'eps': 0.3, 'min_samples': 30},  # 0m ~ 5m 거리
-            }
-        elif self.mission_info.mission_num in [0,1,5]:
-            return {
-                (0, 6): {'eps': 0.1, 'min_samples': 30}
-            }
-        else:
-            return {
+        return {
                 (0, 5): {'eps': 0.15, 'min_samples': 30},
                 (0, 10): {'eps': 0.2, 'min_samples': 25},  # 0m ~ 10m 거리
                 (10, 15): {'eps': 0.3, 'min_samples': 20},
