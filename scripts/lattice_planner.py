@@ -8,7 +8,7 @@ from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path, Odometry
 import numpy as np
 import sensor_msgs.point_cloud2 as pc2
-from kurrier.msg import mission  # 사용자 정의 메시지 임포트
+#from kurrier.msg import mission  # 사용자 정의 메시지 임포트
 from geometry_msgs.msg import Quaternion
 import tf
 
@@ -27,10 +27,7 @@ class LatticePlanner:
 
         self.is_path = False
         self.is_obj = False
-        self.is_1st_lattice_started = False
-        self.is_2nd_lattice_started = False
-        self.is_1st_slam_started = False
-        self.is_2nd_slam_started = False
+        
         self.local_path = None
         self.lattice_path = None
         self.is_odom=False
