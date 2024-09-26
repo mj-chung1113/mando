@@ -15,6 +15,7 @@ class SCANCluster:
         self.scan_sub = rospy.Subscriber("/velodyne_points", PointCloud2, self.callback)
         self.clusterpoints_pub = rospy.Publisher("/cluster_points", PointCloud2, queue_size=10)
         self.pc_np = None
+        self.min_distance = float('inf')  # 초기 최소 거리를 무한대로 설정
 
     def callback(self, msg):
         self.pc_np = self.pointcloud2_to_xyz(msg)
@@ -33,6 +34,8 @@ class SCANCluster:
         # 3. 거리별로 클러스터링 수행 (xyz + intensity 기반)
         cluster_points = []
         cluster_intensity_averages = []
+        self.min_distance = float('inf')  # 각 콜백마다 최소 거리 초기화
+
         for dist_range, params in self.get_dbscan_params_by_distance().items():
             # 해당 거리 범위의 포인트 필터링
             mask = (self.pc_np[:, 4] >= dist_range[0]) & (self.pc_np[:, 4] < dist_range[1])
@@ -55,13 +58,21 @@ class SCANCluster:
                 cluster_points.append([c_xyz_mean[0], c_xyz_mean[1], c_xyz_mean[2]])  # xyz 좌표 포함
                 cluster_intensity_averages.append(c_intensity_mean)  # intensity 평균 저장
 
+                # 클러스터의 평균 포인트로부터 최소 거리 계산
+                distance_to_cluster = np.linalg.norm(c_xyz_mean[:2])  # x, y 좌표를 기준으로 거리 계산
+                if distance_to_cluster < self.min_distance:
+                    self.min_distance = distance_to_cluster
+
             # 평균 intensity 로그 출력
             rospy.loginfo(f"Distance Range: {dist_range}, Cluster Intensity Average: {cluster_intensity_averages}")
+
+        # 최소 거리 로그 출력
+        rospy.loginfo(f"Minimum Distance to Clustered Obstacle: {self.min_distance} meters")
 
         # 각 클러스터의 대표 포인트 및 평균 intensity로만 이루어진 포인트 클라우드 퍼블리시
         self.publish_point_cloud(cluster_points, cluster_intensity_averages)
 
-    def remove_noise_by_intensity(self, points, noise_threshold=1):
+    def remove_noise_by_intensity(self, points, noise_threshold=0.1):
         """
         intensity 값이 noise_threshold 이하인 포인트는 노이즈로 간주하여 제거.
         """
@@ -98,10 +109,11 @@ class SCANCluster:
         거리 범위에 따라 DBSCAN의 eps와 min_samples 파라미터를 설정합니다.
         """
         return {
-            (0, 5): {'eps': 0.1, 'min_samples': 25},
-            (5, 10): {'eps': 0.1, 'min_samples': 15},  # intensity 포함 -> eps 값 조정
-            (10, 30): {'eps': 0.33, 'min_samples': 10},
-            (30, 50): {'eps': 0.45, 'min_samples': 7},
+            (2, 5): {'eps': 0.1, 'min_samples': 30},
+            (5, 10): {'eps': 0.18, 'min_samples': 15},  # intensity 포함 -> eps 값 조정
+            (10, 20): {'eps': 0.33, 'min_samples': 13},
+            (20, 30): {'eps': 0.45, 'min_samples': 10},
+            (30, 40): {'eps': 0.47, 'min_samples': 7},
         }
 
     def publish_point_cloud(self, points, intensity_averages):
@@ -133,7 +145,7 @@ class SCANCluster:
             angle = np.arctan2(point[1], point[0])
 
             # point[0] = x / point[1] = y / point[2] = z / point[3] = intensity
-            if -1 < point[0] < 50 and -3 < point[1] < 3 and (dist < 50) and (-1.4 < point[2] < -0.3):
+            if -2 < point[0] < 45 and -5 < point[1] < 5 and (1.5< dist < 45) and (-1.4 < point[2] < 0):
                 point_list.append((point[0], point[1], 0, point[3], dist, angle))
 
         point_np = np.array(point_list, np.float32)

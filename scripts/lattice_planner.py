@@ -35,24 +35,24 @@ class LatticePlanner:
         
         self.lfd = 30  # 경로 생성 끝점
 
-        base_offset = 1.6 * 0.3 * 20  # 인덱스 1당 30cm의 증가율 적용
-        self.lane_weight = [ 4, 3, 2, 1, 50, 51, 52, 53 ]
+        base_offset = 1.5 * 0.3 * 20  # 인덱스 1당 30cm의 증가율 적용
+        self.lane_weight = [ 53, 52, 51, 50, 10, 51, 52, 53 ]
 
         offset_steps = 10
         step_size = base_offset * 2 / offset_steps
 
         self.lane_off_set = [
             -1*base_offset,
-            -1*base_offset + step_size * 1.5,
+            -1*base_offset + step_size * 1.4,
             -1*base_offset + step_size * 2.5,
-            -1*base_offset + step_size * 3.5,
-            base_offset - (step_size * 3.5),
+            -1*base_offset + step_size * 3.8,
+            base_offset - (step_size * 3.8),
             base_offset - (step_size * 2.5),
-            base_offset - (step_size * 1.5),
+            base_offset - (step_size * 1.4),
             base_offset,
         ]
 
-        self.checkObject_dis = 1.7
+        self.checkObject_dis = 1.6
         self.lane_weight_distance = 2.6
 
         rate = rospy.Rate(30)  # 30hz 로 동작하는 코드임
@@ -126,30 +126,30 @@ class LatticePlanner:
     #생성될 후보 lattice_path 들과 장애물과의 거리를 계산해 가중치를 부여하는 함수 
     def collision_check(self, object_points, out_path):
         selected_lane = 12
-        self.lane_weight = [ 4, 3, 2, 1, 10, 20, 30, 40 ]
+        self.lane_weight = [ 54,53 ,52, 51, 1, 2, 3, 4 ]
         max_weight = 3000
         for point in object_points:
             for path_num in range(len(out_path)):
                 for path_pos in out_path[path_num].poses:
                     dis = sqrt(pow(point[0] - path_pos.pose.position.x, 2) + pow(point[1] - path_pos.pose.position.y, 2))
                     
-                    if  2.8 < dis < 3.3:
+                    if  3.5 < dis < 4.0:
                         self.lane_weight[path_num] += 1
-                    elif 2.4 < dis < 2.8 :
+                    elif 3.1 < dis < 3.5 :
                         self.lane_weight[path_num] += 2
-                    elif  2.0 < dis < 2.4:
+                    elif  2.7 < dis < 3.1:
                         self.lane_weight[path_num] += 4
-                    elif  1.6 < dis < 1.9:
+                    elif  2.4 < dis < 2.7:
                         self.lane_weight[path_num] += 7
-                    elif  1.3 < dis < 1.6:
+                    elif  2.1 < dis < 2.4:
                         self.lane_weight[path_num] += 10
-                    elif  1.1 < dis < 1.3:
+                    elif  1.8 < dis < 2.1:
                         self.lane_weight[path_num] += 15
-                    elif  0.9 < dis < 1.1:
+                    elif  1.5 < dis < 1.8:
                         self.lane_weight[path_num] += 21
-                    elif  0.7 < dis < 0.9:
+                    elif  1.0 < dis < 1.5:
                         self.lane_weight[path_num] += 30
-                    elif   dis < 0.7 :
+                    elif   dis < 1 :
                         self.lane_weight[path_num] += 50
                     else: 
                         self.lane_weight[path_num] -= 1
@@ -259,7 +259,7 @@ class LatticePlanner:
 
         # self.local_path의 마지막 점을 end_pos에 저장하는 코드
         if self.local_path and len(self.local_path.poses) > 0:
-            last_pose = self.local_path.poses[int(min(max(2*self.lfd,10.0),50.0))]
+            last_pose = self.local_path.poses[int(min(max(3.0*self.lfd,20.0),50.0))]
             end_pos = {'x': last_pose.pose.position.x, 'y': last_pose.pose.position.y}
             #rospy.loginfo(f"End position set to x: {end_pos['x']}, y: {end_pos['y']}")
         else:
@@ -307,8 +307,8 @@ class LatticePlanner:
             a = [0.0, 0.0, 0.0, 0.0]
             a[0] = ps
             a[1] = 0
-            a[2] = 4.7 * (pf - ps) / (xf * xf)
-            a[3] = -3.7 * (pf - ps) / (xf * xf * xf)
+            a[2] = 3.7 * (pf - ps) / (xf * xf)
+            a[3] = -2.7 * (pf - ps) / (xf * xf * xf)
 
             for i in x:
                 result = a[3] * i * i * i + a[2] * i * i + a[1] * i + a[0]

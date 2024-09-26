@@ -53,12 +53,12 @@ class pure_pursuit:
 
         # 자차 제원 
         self.vehicle_length = 3  # 차량의 wheel base = 3m, pure pursuit 계산 시 길이 말하는것 
-        self.lfd = 20
+        self.lfd = 10
 
         self.min_lfd = 5
         self.max_lfd = 40
-        self.lfd_gain = 0.5
-        self.target_velocity = 35  # 차량의 한계속도. 수정 필요, 구간에 따라 동적으로 조절할 예정 
+        self.lfd_gain = 0.3
+        self.target_velocity = 40  # 차량의 한계속도. 수정 필요, 구간에 따라 동적으로 조절할 예정 
 
         self.pid = pidControl()
         self.vel_planning = velocityPlanning(self.target_velocity / 3.6, 0.4)  # km/h -> m/s 변환
@@ -79,7 +79,7 @@ class pure_pursuit:
 
                 self.current_waypoint = self.get_current_waypoint(self.path)
                 normalized_steer = abs(self.ctrl_cmd_msg.steering) / 0.6981
-                self.target_velocity = self.velocity_list[self.current_waypoint] * 3.6 * (1 - 0.85 * normalized_steer)
+                self.target_velocity = self.velocity_list[self.current_waypoint] * 3.6 * (1 - 0.1 * normalized_steer)
 
                 if self.is_look_forward_point:
                     self.ctrl_cmd_msg.steering = steering
@@ -95,7 +95,7 @@ class pure_pursuit:
                     if not self.stop_signal_received:
                         self.stop_signal_received = True  # 첫 번째 신호 처리
                         self.stop_time = rospy.Time.now()  # 시작 시간 기록
-                        rospy.loginfo(f"Initial stop! Braking for 3 seconds.")
+                        rospy.loginfo(f"Initial stop! Braking for 4 seconds.")
                         self.ctrl_cmd_msg.accel = 0.0
                         self.ctrl_cmd_msg.brake = 1.0
                         # 제어입력 메세지 Publish
@@ -105,7 +105,7 @@ class pure_pursuit:
                         # 3초가 지난 후 동작 (3초 동안 제동 유지)
                         elapsed_time = rospy.Time.now() - self.stop_time
                         if elapsed_time.to_sec() >= 4:
-                            rospy.loginfo(f"3 seconds passed, maintaining stop signal.")
+                            rospy.loginfo(f"4 seconds passed, maintaining stop signal.")
                             self.ctrl_cmd_msg.accel = 0.0
                             self.ctrl_cmd_msg.brake = 1.0
                 else:
@@ -155,16 +155,21 @@ class pure_pursuit:
 
     def get_current_waypoint(self, path):
         min_dist = float('inf')        
-        currnet_waypoint = -1
+        current_waypoint = -1
+        lookahead_distance = self.lfd  # 속도에 따른 Look Ahead Distance를 사용
+        max_lookahead_distance = 40  # 차량이 절대 넘어가면 안 되는 거리 (필요시 조정)
+
         for i, pose in enumerate(path.poses):
             dx = self.current_postion.x - pose.pose.position.x
             dy = self.current_postion.y - pose.pose.position.y
-
             dist = sqrt(pow(dx, 2) + pow(dy, 2))
-            if min_dist > dist:
+
+            # Look Ahead Distance 내에서 가장 가까운 경로점 선택
+            if lookahead_distance <= dist <= max_lookahead_distance and dist < min_dist:
                 min_dist = dist
-                currnet_waypoint = i
-        return currnet_waypoint
+                current_waypoint = i
+
+        return current_waypoint
 
     def calc_pure_pursuit(self):
         # 속도 비례 Look Ahead Distance 값 설정
@@ -224,16 +229,16 @@ class pure_pursuit:
                 k = self.calculate_stanley_gain(curvature)
             else:
                 rospy.loginfo("Not enough points ahead to calculate curvature, using default gain.")
-                k = 0.1
+                k = 0.23
         else:
             rospy.loginfo("Not enough points to calculate curvature, using default values.")
-            k = 0.1
+            k = 0.23
 
         self.is_look_forward_point = False
 
         # 차량의 앞바퀴 위치를 계산 (차량의 중심으로부터 wheel_base 만큼 앞쪽으로 이동)
-        front_axle_x = self.current_postion.x + cos(self.vehicle_yaw) * self.vehicle_length
-        front_axle_y = self.current_postion.y + sin(self.vehicle_yaw) * self.vehicle_length
+        front_axle_x = self.current_postion.x + cos(self.vehicle_yaw) * 0
+        front_axle_y = self.current_postion.y + sin(self.vehicle_yaw) * 0
         front_axle_position = [front_axle_x, front_axle_y]
 
         translation = [front_axle_x, front_axle_y]
@@ -285,7 +290,11 @@ class pure_pursuit:
         area = sqrt(area_squared)
         radius = (A * B * C) / (4 * area)
         curvature = 1 / radius
+        # 곡률 값에 상한선과 하한선 적용
+        min_curvature = 0.001  # 최소 곡률 값 (직선에 가까운 경우)
+        max_curvature = 0.3    # 최대 곡률 값 (급격한 회전)
 
+        curvature = max(min_curvature, min(curvature, max_curvature))
         return curvature
 
     # 스탠리 알고리즘에서 사용하는 동적 게인 계산
@@ -297,19 +306,19 @@ class pure_pursuit:
             speed_gain = 1 / (speed + 1e-3)  # 속도가 클수록 스티어링 게인 낮아짐
 
         curvature_gain = max_curvature  # 경로 상의 곡률에 따른 게인 조정
-        k = 0.2 + (speed_gain * curvature_gain)
-
+        k = 0.23 + (speed_gain * curvature_gain)
+        
         # 게인의 상한/하한 설정
-        min_k = 0.1
-        max_k = 2.0
+        min_k = 0.15
+        max_k = 0.7
         k = np.clip(k, min_k, max_k)
-
+        rospy.loginfo(f"현재 gain : {k}")
         return k
 
 class pidControl:
     def __init__(self):
-        self.p_gain = 0.05
-        self.i_gain = 0.02
+        self.p_gain = 0.06
+        self.i_gain = 0.03
         self.d_gain = 0.05
         self.prev_error = 0
         self.i_control = 0
@@ -454,9 +463,13 @@ class velocityPlanning:
 
             # 각도 차이에 따라 속도 계획 (단위: m/s)
             if heading_error > pi / 6:  # 각도 차이가 30도 이상일 때
-                v_max = self.car_max_speed * 0.5  # 속도 절반으로 줄임
+                v_max = self.car_max_speed * 0.6  # 속도 절반으로 줄임
+            elif heading_error > pi / 9:  # 각도 차이가 20도 이상일 때
+                v_max = self.car_max_speed * 0.73  # 속도를 75%로 줄임
             elif heading_error > pi / 12:  # 각도 차이가 15도 이상일 때
-                v_max = self.car_max_speed * 0.75  # 속도를 75%로 줄임
+                v_max = self.car_max_speed * 0.83  # 속도를 83%로 줄임
+            elif heading_error > pi / 20:  # 각도 차이가 9도 이상일 때
+                v_max = self.car_max_speed * 0.9  # 속도를 75%로 줄임
             else:
                 v_max = self.car_max_speed  # 각도 차이가 작으면 최대 속도 유지
 
