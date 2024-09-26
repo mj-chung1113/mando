@@ -55,10 +55,10 @@ class pure_pursuit:
         self.vehicle_length = 3  # 차량의 wheel base = 3m, pure pursuit 계산 시 길이 말하는것 
         self.lfd = 20
 
-        self.min_lfd = 6
+        self.min_lfd = 5
         self.max_lfd = 40
         self.lfd_gain = 0.5
-        self.target_velocity = 30  # 차량의 한계속도. 수정 필요, 구간에 따라 동적으로 조절할 예정 
+        self.target_velocity = 35  # 차량의 한계속도. 수정 필요, 구간에 따라 동적으로 조절할 예정 
 
         self.pid = pidControl()
         self.vel_planning = velocityPlanning(self.target_velocity / 3.6, 0.4)  # km/h -> m/s 변환
@@ -98,10 +98,13 @@ class pure_pursuit:
                         rospy.loginfo(f"Initial stop! Braking for 3 seconds.")
                         self.ctrl_cmd_msg.accel = 0.0
                         self.ctrl_cmd_msg.brake = 1.0
+                        # 제어입력 메세지 Publish
+                        self.ctrl_cmd_pub.publish(self.ctrl_cmd_msg)
+                        self.lfd_pub.publish(self.lfd)
                     else:
                         # 3초가 지난 후 동작 (3초 동안 제동 유지)
                         elapsed_time = rospy.Time.now() - self.stop_time
-                        if elapsed_time.to_sec() >= 3:
+                        if elapsed_time.to_sec() >= 4:
                             rospy.loginfo(f"3 seconds passed, maintaining stop signal.")
                             self.ctrl_cmd_msg.accel = 0.0
                             self.ctrl_cmd_msg.brake = 1.0
@@ -167,7 +170,7 @@ class pure_pursuit:
         # 속도 비례 Look Ahead Distance 값 설정
         self.lfd = (self.ego_vehicle_status.velocity.x) * 3.6 * self.lfd_gain
         self.lfd = min(max(self.min_lfd, self.lfd), self.max_lfd)
-        #rospy.loginfo(self.lfd)
+        rospy.loginfo(self.lfd)
 
         vehicle_position = self.current_postion
         self.is_look_forward_point = False
@@ -208,7 +211,7 @@ class pure_pursuit:
         # 스탠리 제어 알고리즘을 차량의 앞바퀴 기준으로 수정
         self.lfd = (self.ego_vehicle_status.velocity.x) * 3.6 * self.lfd_gain
         self.lfd = min(max(self.min_lfd, self.lfd), self.max_lfd)
-
+        rospy.loginfo(self.lfd)
         #stanley 동적 gain
         if len(self.path.poses) > 3:
             current_waypoint = self.get_current_waypoint(self.path)
@@ -221,10 +224,10 @@ class pure_pursuit:
                 k = self.calculate_stanley_gain(curvature)
             else:
                 rospy.loginfo("Not enough points ahead to calculate curvature, using default gain.")
-                k = 0.2
+                k = 0.1
         else:
             rospy.loginfo("Not enough points to calculate curvature, using default values.")
-            k = 0.2
+            k = 0.1
 
         self.is_look_forward_point = False
 
@@ -347,7 +350,7 @@ class velocityPlanning:
 
         curvature_threshold = 0.5  # 곡률 임계값 설정
         slow_down_distance = 150  # 미리 속도 감소할 거리 (웨이포인트 개수 기준)
-        look_ahead_distance = 200  # 앞쪽 웨이포인트에서 곡률을 확인할 거리
+        look_ahead_distance = 40  # 앞쪽 웨이포인트에서 곡률을 확인할 거리
         reduced_speed = 15 / 3.6  # 속도 20km/h로 제한
 
         # 초기 몇 개의 웨이포인트는 최대 속도로 설정

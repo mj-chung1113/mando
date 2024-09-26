@@ -27,8 +27,8 @@ class SCANCluster:
         # 2. 바닥 평면 제거 (필요하면 주석 해제)
         # self.pc_np = self.remove_floor_plane(self.pc_np)
 
-        # Z 좌표 조정
-        self.pc_np[:, 2] = self.pc_np[:, 2] * 0.2 
+        # Z 좌표를 0으로 조정
+        self.pc_np[:, 2] = 0.0
         
         # 3. 거리별로 클러스터링 수행 (xyz + intensity 기반)
         cluster_points = []
@@ -55,15 +55,19 @@ class SCANCluster:
                 cluster_points.append([c_xyz_mean[0], c_xyz_mean[1], c_xyz_mean[2]])  # xyz 좌표 포함
                 cluster_intensity_averages.append(c_intensity_mean)  # intensity 평균 저장
 
+            # 평균 intensity 로그 출력
+            rospy.loginfo(f"Distance Range: {dist_range}, Cluster Intensity Average: {cluster_intensity_averages}")
+
         # 각 클러스터의 대표 포인트 및 평균 intensity로만 이루어진 포인트 클라우드 퍼블리시
         self.publish_point_cloud(cluster_points, cluster_intensity_averages)
 
-    def remove_noise_by_intensity(self, points, noise_threshold=0.1):
+    def remove_noise_by_intensity(self, points, noise_threshold=1):
         """
         intensity 값이 noise_threshold 이하인 포인트는 노이즈로 간주하여 제거.
         """
         intensity_values = points[:, 3]  # intensity 값은 4번째 컬럼에 있음
         mask = intensity_values > noise_threshold  # noise_threshold보다 큰 값만 남김
+        rospy.loginfo(f"Noise Threshold: {noise_threshold}, Points Remaining: {np.sum(mask)}")
         return points[mask]
 
     def remove_floor_plane(self, points):
@@ -129,8 +133,8 @@ class SCANCluster:
             angle = np.arctan2(point[1], point[0])
 
             # point[0] = x / point[1] = y / point[2] = z / point[3] = intensity
-            if -1 < point[0] < 60 and -3 < point[1] < 3 and (dist < 60) and (-1.43 < point[2] < -0.3):
-                point_list.append((point[0], point[1], point[2], point[3], dist, angle))
+            if -1 < point[0] < 50 and -3 < point[1] < 3 and (dist < 50) and (-1.4 < point[2] < -0.3):
+                point_list.append((point[0], point[1], 0, point[3], dist, angle))
 
         point_np = np.array(point_list, np.float32)
         return point_np

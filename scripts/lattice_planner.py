@@ -189,8 +189,8 @@ class LatticePlanner:
             distance = sqrt(pow(abs_x - ego_x, 2) + pow(abs_y - ego_y, 2))
             if distance < min_distance:
                 min_distance = distance
-        #rospy.loginfo(f"장애물과 차량 사이의 최소 거리: {min_distance}m")
-        #rospy.loginfo(f"Received and stored {len(self.object_points)} obstacle points. is_obj = True")
+        rospy.loginfo(f"장애물과 차량 사이의 최소 거리: {min_distance}m")
+        rospy.loginfo(f"Received and stored {len(self.object_points)} obstacle points. is_obj = True")
         #if len(self.object_points) > 0:
             #rospy.loginfo(f"First obstacle point (absolute): x={self.object_points[0][0]}, y={self.object_points[0][1]}, z={self.object_points[0][2]}")
     
@@ -230,11 +230,11 @@ class LatticePlanner:
         heading = atan2(2.0 * (orientation.w * orientation.z + orientation.x * orientation.y),
                         1.0 - 2.0 * (orientation.y**2 + orientation.z**2))
         
-        wheel_base = -3.4  # 차량의 wheel base (m)
+        wheel_base = 0 # 차량의 wheel base (m)
         front_axle_x = ego_x + cos(heading) * wheel_base
         front_axle_y = ego_y + sin(heading) * wheel_base   
         # 변환 행렬을 사용하여 상대 좌표를 절대 좌표로 변환
-        abs_x = front_axle_x + cos(heading) * (rel_x + 0.0) - sin(heading) * rel_y
+        abs_x = front_axle_x + cos(heading) * (rel_x -1.33) - sin(heading) * rel_y
         abs_y = front_axle_y + sin(heading) * (rel_x + 0.0) + cos(heading) * rel_y
         abs_z = ego_z + rel_z  # z는 일반적으로 사용되지 않지만 포함
 
@@ -259,7 +259,7 @@ class LatticePlanner:
 
         # self.local_path의 마지막 점을 end_pos에 저장하는 코드
         if self.local_path and len(self.local_path.poses) > 0:
-            last_pose = self.local_path.poses[int(min(max(3.334*self.lfd,20.0),50.0))]
+            last_pose = self.local_path.poses[int(min(max(2*self.lfd,10.0),50.0))]
             end_pos = {'x': last_pose.pose.position.x, 'y': last_pose.pose.position.y}
             #rospy.loginfo(f"End position set to x: {end_pos['x']}, y: {end_pos['y']}")
         else:
