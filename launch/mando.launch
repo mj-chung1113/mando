@@ -1,13 +1,11 @@
 <launch>
     <node pkg="mando" type="gpsimu_parser.py" name="gpsimu_parser"/>
-    
-    <!-- <node pkg="mando" type="planning.py" name="planning"/> -->
+    <node pkg="mando" type="mission.py" name="mission" />
     <node pkg="mando" type="planning.py" name="planning"/>
-    
-    
-    
-    <node pkg="mando" type="lattice_planner.py" name="lattice_planner" /> 
-    <node pkg="mando" type="maincontrol.py" name="maincontrol" output="screen" />
+    <node pkg="mando" type="vision.py" name="vision" output="screen"/>
+    <node pkg="mando" type="lattice_planner.py" name="lattice_planner"/> 
+    <node pkg="mando" type="maincontrol.py" name="maincontrol"   />
+    <node pkg="mando" type="stop.py" name="stop" output = "screen"/>
     <include file="$(find velodyne_pointcloud)/launch/VLP16_points.launch">
         <arg name="frame_id" value="map"/>
     </include>

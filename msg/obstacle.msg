@@ -1,0 +1,2 @@
+int32 classnum
+float32 collision_probability

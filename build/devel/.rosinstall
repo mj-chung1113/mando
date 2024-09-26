@@ -1,0 +1,2 @@
+- setup-file:
+    local-name: /home/jmj/catkin_ws/src/mando/build/devel/setup.sh

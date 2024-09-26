@@ -1,0 +1,8 @@
+prefix=/home/jmj/catkin_ws/src/mando/build/devel
+
+Name: mando
+Description: Description of mando
+Version: 0.0.0
+Cflags: -I/home/jmj/catkin_ws/src/mando/build/devel/include
+Libs: -L${prefix}/lib -lmando
+Requires: rospy std_msgs message_runtime

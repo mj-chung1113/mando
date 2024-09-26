@@ -34,7 +34,7 @@ class planning :
         
         self.f.close()
 
-        rate = rospy.Rate(20) # 20hz
+        rate = rospy.Rate(15) # 20hz
         while not rospy.is_shutdown():
    
             if self.is_odom == True:
