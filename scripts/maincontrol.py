@@ -26,6 +26,7 @@ class pure_pursuit:
         rospy.Subscriber("/Competition_topic", EgoVehicleStatus, self.status_callback)
         rospy.Subscriber("/mission", mission, self.mission_callback)
         rospy.Subscriber("/stop_signal", Bool, self.stop_callback)
+        rospy.Subscriber("/warn_signal", Float32, self.warn_callback)
 
         # Publisher: 차량 제어 명령을 발행
         self.ctrl_cmd_pub = rospy.Publisher('/ctrl_cmd', CtrlCmd, queue_size=1)
@@ -44,6 +45,7 @@ class pure_pursuit:
         self.is_global_path = False
         self.is_look_forward_point = False
         self.stop_signal = False 
+        self.warn_signal = 0.0
         self.stop_signal_received = False  # 첫 번째 신호 처리
         self.stop_time = 0
         # 전방 목표 지점과 현재 위치 저장 변수
@@ -79,8 +81,9 @@ class pure_pursuit:
 
                 self.current_waypoint = self.get_current_waypoint(self.path)
                 normalized_steer = abs(self.ctrl_cmd_msg.steering) / 0.6981
+                normalized_warn = 1-0.3 * self.warn_signal
                 self.target_velocity = self.velocity_list[self.current_waypoint] * 3.6 * (1 - 0.1 * normalized_steer)
-
+                self.target_velocity = self.target_velocity * normalized_warn
                 if self.is_look_forward_point:
                     self.ctrl_cmd_msg.steering = steering
 
@@ -152,6 +155,8 @@ class pure_pursuit:
     
     def stop_callback(self,msg):
         self.stop_signal = msg.data
+    def warn_callback(self,msg):
+        self.warn_signal = msg.data 
 
     def get_current_waypoint(self, path):
         min_dist = float('inf')        
@@ -250,17 +255,33 @@ class pure_pursuit:
 
         det_trans_matrix = np.linalg.inv(trans_matrix)
 
+        closest_point = None  # 가장 가까운 포인트
+        closest_dis = float('inf')  # 가장 가까운 거리 초기화
+        
         for num, i in enumerate(self.path.poses):
             path_point = i.pose.position
             global_path_point = [path_point.x, path_point.y, 1]
             local_path_point = det_trans_matrix.dot(global_path_point)    
 
-            if local_path_point[0] > 0:
+            if local_path_point[0] > 0:  # 차량 앞쪽에 있는 포인트만 고려
                 dis = sqrt(pow(local_path_point[0], 2) + pow(local_path_point[1], 2))
+
+                # LFD 조건을 만족하는 포인트가 있으면 바로 사용
                 if dis >= self.lfd:
                     self.forward_point = path_point
                     self.is_look_forward_point = True
                     break
+                
+                # 가장 가까운 포인트를 추적
+                if dis < closest_dis:
+                    closest_dis = dis
+                    closest_point = path_point
+
+        # LFD 조건을 만족하는 포인트가 없을 때, 가장 가까운 포인트 사용
+        if not self.is_look_forward_point and closest_point is not None:
+            self.forward_point = closest_point
+            self.is_look_forward_point = True
+            rospy.logwarn("No point found that satisfies LFD. Using closest point as forward point.")
 
         # 간단한 Stanley 제어 각도 계산 예제
         theta = atan2(local_path_point[1], local_path_point[0])
@@ -354,89 +375,6 @@ class velocityPlanning:
         self.road_friction = road_friction
     # 경로 기반으로 곡률을 계산하여 속도 계획 생성
     
-    def curvedBaseVelocity1(self, global_path, point_num=2):
-        out_vel_plan = []
-
-        curvature_threshold = 0.5  # 곡률 임계값 설정
-        slow_down_distance = 150  # 미리 속도 감소할 거리 (웨이포인트 개수 기준)
-        look_ahead_distance = 40  # 앞쪽 웨이포인트에서 곡률을 확인할 거리
-        reduced_speed = 15 / 3.6  # 속도 20km/h로 제한
-
-        # 초기 몇 개의 웨이포인트는 최대 속도로 설정
-        for i in range(0, point_num):
-            out_vel_plan.append(self.car_max_speed)
-
-        # 경로 전체를 따라 곡률 계산 및 속도 설정
-        for i in range(point_num, len(global_path.poses) - point_num):
-            x_list = []
-            y_list = []
-            for box in range(-point_num, point_num):
-                x = global_path.poses[i + box].pose.position.x
-                y = global_path.poses[i + box].pose.position.y
-                x_list.append([-2 * x, -2 * y, 1])
-                y_list.append((-x * x) - (y * y))
-
-            x_matrix = np.array(x_list)
-            y_matrix = np.array(y_list)
-            x_trans = x_matrix.T
-
-            a_matrix = np.linalg.inv(x_trans.dot(x_matrix)).dot(x_trans).dot(y_matrix)
-            a = a_matrix[0]
-            b = a_matrix[1]
-            c = a_matrix[2]
-            r = sqrt(a * a + b * b - c)
-
-            # 곡률에 따른 최대 속도 계산
-            v_max = sqrt(r * 9.8 * self.road_friction)
-
-            if v_max > self.car_max_speed:
-                v_max = self.car_max_speed
-
-            # 곡률이 큰 구간에 대해 속도 제한
-            if r < 1 / curvature_threshold:
-                v_max = min(v_max, reduced_speed)
-
-            # 앞으로 곡률이 클 경우 미리 속도 줄이기
-            ahead_curvature_exceeded = False
-            for lookahead in range(i, min(i + look_ahead_distance, len(global_path.poses) - point_num)):
-                ahead_x_list = []
-                ahead_y_list = []
-                for box in range(-point_num, point_num):
-                    ahead_x = global_path.poses[lookahead + box].pose.position.x
-                    ahead_y = global_path.poses[lookahead + box].pose.position.y
-                    ahead_x_list.append([-2 * ahead_x, -2 * ahead_y, 1])
-                    ahead_y_list.append((-ahead_x * ahead_x) - (ahead_y * ahead_y))
-
-                ahead_x_matrix = np.array(ahead_x_list)
-                ahead_y_matrix = np.array(ahead_y_list)
-                ahead_x_trans = ahead_x_matrix.T
-
-                ahead_a_matrix = np.linalg.inv(ahead_x_trans.dot(ahead_x_matrix)).dot(ahead_x_trans).dot(ahead_y_matrix)
-                ahead_a = ahead_a_matrix[0]
-                ahead_b = ahead_a_matrix[1]
-                ahead_c = ahead_a_matrix[2]
-                ahead_r = sqrt(ahead_a * ahead_a + ahead_b * ahead_b - ahead_c)
-
-                if ahead_r < 1 / curvature_threshold:
-                    ahead_curvature_exceeded = True
-                    break
-
-            # 곡률이 큰 구간에 대해 속도 감소 적용
-            if ahead_curvature_exceeded:
-                for j in range(max(0, i - slow_down_distance), i):
-                    out_vel_plan[j] = min(out_vel_plan[j], reduced_speed)
-
-            out_vel_plan.append(v_max)
-
-        # 경로 마지막 구간에서는 속도 줄이기
-        for i in range(len(global_path.poses) - point_num, len(global_path.poses) - 10):
-            out_vel_plan.append(30)
-
-        for i in range(len(global_path.poses) - 10, len(global_path.poses)):
-            out_vel_plan.append(0)
-
-        return out_vel_plan
-
     def curvedBaseVelocity(self, global_path, point_num, current_position, vehicle_yaw):
         out_vel_plan = []
 
