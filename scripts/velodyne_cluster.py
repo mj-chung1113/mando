@@ -26,12 +26,12 @@ class SCANCluster:
         # 2. Intensity 값을 0~1로 스케일링
         self.pc_np[:, 3] = self.pc_np[:, 3] / 510  # intensity가 4번째 컬럼에 있음
 
-        # Z 좌표를 0으로 조정
-        self.pc_np[:, 2] = 0.0
-
+        # Z 좌표를 0으로 조정 
+        self.pc_np[:, 2] = 0.0 
+ 
         # 3. 거리별로 클러스터링 수행 (xyz + intensity 기반)
         cluster_points = []
-        cluster_intensity_averages = []
+        cluster_intensity_averages = [] #디버깅 
         self.min_distance = float('inf')  # 각 콜백마다 최소 거리 초기화
 
         for dist_range, params in self.get_dbscan_params_by_distance().items():
@@ -75,20 +75,41 @@ class SCANCluster:
 
     def calculate_warn_signal(self, cluster_points):
         """
-        차량 전방 20미터 이내, 차량 x축 기준으로 가까운 장애물일수록 warn 값을 높이고
-        각도가 90도에 가까울수록 warn 값을 낮춘다.
+        차량 전방 21.33미터 이내, 차량 x축 기준으로 가까운 장애물일수록 warn 값을 높이고
+        각도가 0도에 가까울수록 warn 값을 높인다. 거리가 3.33미터에 가까울수록 warn 값이 1에 가깝고,
+        21.33미터에 가까울수록 warn 값을 낮춘다. 3.33미터보다 가까운 경우 warn 값은 1이다.
         """
+        
+        #self.warn = 0.0
+
         for point in cluster_points:
             x, y, z = point
             distance = np.sqrt(x**2 + y**2)
 
-            if x > -1 and -3 < y < 3 and distance < 20:  # 전방이고 20m 이내
+            if x > 0 and -2.3 < y < 2.3 and distance < 28:  # 전방이고 21.33m 이내
                 angle = abs(np.arctan2(y, x))  # 차량 전방과의 각도 (라디안)
-                self.warn = max(0, 1 - (angle / (np.pi / 2)))  # 90도에 가까울수록 warn 값이 0에 가까움
+                angle_scale = max(0, 1 - (angle / (np.pi / 3)))  # ±60도 기준으로 스케일링
 
-                # warn 값 퍼블리시
-                self.warn_pub.publish(Float32(self.warn))
-                rospy.loginfo(f"Warn signal: {self.warn}, Angle: {angle * 180 / np.pi:.2f} degrees")
+                # 거리가 3.33 미터보다 가까운 경우 warn을 1로 설정
+                if distance <= 9:
+                    distance_scale = 1
+                else:
+                    # 거리는 3.33m에서 21.33m로 스케일링. 가까울수록 warn이 1, 멀수록 0
+                    distance_scale =  min(1.00,max(0.001, 1 - ((distance - 9) / (26 - 9))))
+
+                # 각도와 거리 스케일링을 곱하여 warn 값을 계산
+                current_warn = angle_scale * distance_scale
+
+                # 최대 warn 값을 업데이트
+                if current_warn > self.warn:
+                    self.warn = current_warn
+
+        # 최대 warn 값 퍼블리시
+        
+        self.warn_pub.publish(Float32(self.warn))
+        rospy.loginfo(f"Warn signal: {self.warn}")
+        self.warn = min(1,max(0.0001,0.83 *self.warn))
+        
 
     def remove_noise_by_intensity(self, points, noise_threshold=0.1):
         """

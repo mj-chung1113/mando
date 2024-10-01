@@ -48,7 +48,7 @@ class MissionNode:
             {'mission_number': 8, 'x': 413.37670903489925, 'y': -7.062285822350532, 'def_speed' : 10},
             {'mission_number': 9, 'x': 443.4772034197813, 'y': 3.4307762002572417, 'def_speed' : 40},
             {'mission_number': 10, 'x': 667.4838867701474, 'y': -128.98658935027197, 'def_speed' : 10},
-            {'mission_number': 11, 'x': 677.3521729016793, 'y': -135.78227416286245, 'def_speed' : 10}
+            {'mission_number': 11, 'x': 675.3531860860297, 'y': -134.53734008176252, 'def_speed' : 10}
         ]
 
         rate = rospy.Rate(30)  # 15hz

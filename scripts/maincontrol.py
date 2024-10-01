@@ -14,6 +14,15 @@ from mando.msg import mission
 import numpy as np
 import tf
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
+from morai_msgs.srv import MoraiEventCmdSrv, MoraiEventCmdSrvRequest
+from enum import Enum
+
+# 기어 상태를 나타내는 Enum 클래스 추가
+class Gear(Enum):
+    P = 1
+    R = 2
+    N = 3
+    D = 4
 
 class pure_pursuit:
     def __init__(self):
@@ -32,6 +41,10 @@ class pure_pursuit:
         self.ctrl_cmd_pub = rospy.Publisher('/ctrl_cmd', CtrlCmd, queue_size=1)
         self.lfd_pub = rospy.Publisher('/lfd', Float32, queue_size=2)
 
+        #기어 관련 
+        rospy.wait_for_service('/Service_MoraiEventCmd')
+        self.gear_change_service = rospy.ServiceProxy('/Service_MoraiEventCmd', MoraiEventCmdSrv)
+
         # 제어 명령 초기화
         self.ctrl_cmd_msg = CtrlCmd()
         self.ctrl_cmd_msg.longlCmdType = 1
@@ -48,6 +61,7 @@ class pure_pursuit:
         self.warn_signal = 0.0
         self.stop_signal_received = False  # 첫 번째 신호 처리
         self.stop_time = 0
+
         # 전방 목표 지점과 현재 위치 저장 변수
         self.forward_point = Point()
         self.current_postion = Point()
@@ -70,9 +84,8 @@ class pure_pursuit:
             if self.is_path and self.is_odom and self.is_status:
                 # 곡률 기반 속도 계획을 반복적으로 실행, 현재 위치와 차량 헤딩 정보를 전달
                 self.velocity_list = self.vel_planning.curvedBaseVelocity(self.path, 15, self.current_postion, self.vehicle_yaw)
-                #self.velocity_list = self.vel_planning.curvedBaseVelocity1(self.path, point_num=2)
                 
-                if self.ego_vehicle_status.velocity.x * 3.6 <= 15:
+                if self.ego_vehicle_status.velocity.x * 3.6 <= 5:
                     # Pure Pursuit 사용
                     steering = self.calc_pure_pursuit()
                 else:
@@ -81,53 +94,63 @@ class pure_pursuit:
 
                 self.current_waypoint = self.get_current_waypoint(self.path)
                 normalized_steer = abs(self.ctrl_cmd_msg.steering) / 0.6981
-                normalized_warn = 1-0.3 * self.warn_signal
+                normalized_warn = 1-0.30 * self.warn_signal * self.warn_signal
                 self.target_velocity = self.velocity_list[self.current_waypoint] * 3.6 * (1 - 0.1 * normalized_steer)
                 self.target_velocity = self.target_velocity * normalized_warn
+                
                 if self.is_look_forward_point:
                     self.ctrl_cmd_msg.steering = steering
-
                 else: 
                     rospy.loginfo("No found forward point")
                     self.ctrl_cmd_msg.steering = 0.0
                     self.ctrl_cmd_msg.brake = 0.3
 
-                # 급정지 필요시
+                # 미션 종료 처리
+                if self.is_mission_end:
+                    rospy.loginfo("미션이 종료되었습니다.")
+                    self.ctrl_cmd_msg.accel = 0.0
+                    self.ctrl_cmd_msg.brake = 1.0
+                    self.ctrl_cmd_pub.publish(self.ctrl_cmd_msg)
+
+                    rospy.sleep(2)#2초 대기
+
+                    # 기어를 P단으로 변경
+                    self.change_gear_to_p()
+
+                    break  # 미션 종료 시 루프 탈출
+
+                ## 정지 필요시
                 if self.stop_signal:
-                    # stop_signal이 처음 들어왔을 때 3초간 강제 정지
                     if not self.stop_signal_received:
-                        self.stop_signal_received = True  # 첫 번째 신호 처리
+                        self.stop_signal_received = True  # 첫 번째 정지 신호 처리
                         self.stop_time = rospy.Time.now()  # 시작 시간 기록
-                        rospy.loginfo(f"Initial stop! Braking for 4 seconds.")
+                        rospy.loginfo("Initial stop! Braking for 4 seconds.")
                         self.ctrl_cmd_msg.accel = 0.0
                         self.ctrl_cmd_msg.brake = 1.0
-                        # 제어입력 메세지 Publish
+                        # 제어입력 메시지 Publish
                         self.ctrl_cmd_pub.publish(self.ctrl_cmd_msg)
                         self.lfd_pub.publish(self.lfd)
                     else:
-                        # 3초가 지난 후 동작 (3초 동안 제동 유지)
                         elapsed_time = rospy.Time.now() - self.stop_time
                         if elapsed_time.to_sec() >= 4:
-                            rospy.loginfo(f"4 seconds passed, maintaining stop signal.")
+                            rospy.loginfo("4 seconds passed, maintaining stop signal.")
                             self.ctrl_cmd_msg.accel = 0.0
                             self.ctrl_cmd_msg.brake = 1.0
                 else:
-                    # stop_signal이 꺼지면 다시 원래 동작으로 돌아옴
                     self.stop_signal_received = False  # stop signal 리셋
                     output = self.pid.pid(self.target_velocity, self.ego_vehicle_status.velocity.x * 3.6)
                     if output > 0.0:
                         self.ctrl_cmd_msg.accel = output
-                        rospy.loginfo(f"acc: {output}")
+                        rospy.loginfo(f"Acceleration: {output}")
                         self.ctrl_cmd_msg.brake = 0.0
                     else:
                         self.ctrl_cmd_msg.accel = 0.0
                         self.ctrl_cmd_msg.brake = -output
-                        rospy.loginfo(f"brake: {output}")
+                        rospy.loginfo(f"Brake: {output}")
 
-                    # 제어입력 메세지 Publish
                     self.ctrl_cmd_pub.publish(self.ctrl_cmd_msg)
                     self.lfd_pub.publish(self.lfd)
-                    output = 0
+
             rate.sleep()
 
     def path_callback(self, msg):
@@ -150,13 +173,35 @@ class pure_pursuit:
     def mission_callback(self, msg):
         try:
             self.mission_info = msg
+            if self.mission_info.mission_num == 11:  # 예시로 미션 번호가 11이면 종료로 처리
+                self.is_mission_end = True
+            else:
+                self.is_mission_end = False
         except ValueError as e:
             rospy.logerr(f"Invalid driving mode value: {self.mission_info.mission_num}")
-    
+
     def stop_callback(self,msg):
         self.stop_signal = msg.data
     def warn_callback(self,msg):
         self.warn_signal = msg.data 
+    
+    def change_gear_to_p(self):
+        """기어를 P단으로 변경"""
+        try:
+            gear_cmd = MoraiEventCmdSrvRequest()
+            gear_cmd.request.option = 3  # 기어 변경 옵션
+            gear_cmd.request.ctrl_mode = 3  # 제어 모드 설정 (기어 변경 제어)
+            gear_cmd.request.gear = Gear.P.value  # P 기어로 변경
+
+            response = self.gear_change_service(gear_cmd)
+
+            # 요청한 기어 상태가 응답의 기어 상태와 동일한지 확인
+            if response.response.gear == Gear.P.value:
+                rospy.loginfo("기어가 P단으로 변경되었습니다.")
+            else:
+                rospy.logerr("기어를 P단으로 변경하는데 실패했습니다.")
+        except rospy.ServiceException as e:
+            rospy.logerr(f"기어 변경 서비스 호출 실패: {e}")
 
     def get_current_waypoint(self, path):
         min_dist = float('inf')        
@@ -338,9 +383,9 @@ class pure_pursuit:
 
 class pidControl:
     def __init__(self):
-        self.p_gain = 0.06
-        self.i_gain = 0.03
-        self.d_gain = 0.05
+        self.p_gain = 0.32
+        self.i_gain = 0.5
+        self.d_gain = 0.016
         self.prev_error = 0
         self.i_control = 0
         self.controlTime = 0.025
@@ -401,13 +446,13 @@ class velocityPlanning:
 
             # 각도 차이에 따라 속도 계획 (단위: m/s)
             if heading_error > pi / 6:  # 각도 차이가 30도 이상일 때
-                v_max = self.car_max_speed * 0.6  # 속도 절반으로 줄임
-            elif heading_error > pi / 9:  # 각도 차이가 20도 이상일 때
-                v_max = self.car_max_speed * 0.73  # 속도를 75%로 줄임
-            elif heading_error > pi / 12:  # 각도 차이가 15도 이상일 때
-                v_max = self.car_max_speed * 0.83  # 속도를 83%로 줄임
-            elif heading_error > pi / 20:  # 각도 차이가 9도 이상일 때
-                v_max = self.car_max_speed * 0.9  # 속도를 75%로 줄임
+                v_max = self.car_max_speed * 0.65  
+            elif  pi / 6 >= heading_error > pi / 9:  # 각도 차이가 20도 이상일 때
+                v_max = self.car_max_speed * 0.75  
+            elif pi / 9 >= heading_error > pi / 12:  # 각도 차이가 15도 이상일 때
+                v_max = self.car_max_speed * 0.85  
+            elif pi / 12>= heading_error > pi / 20:  # 각도 차이가 9도 이상일 때
+                v_max = self.car_max_speed * 0.95 
             else:
                 v_max = self.car_max_speed  # 각도 차이가 작으면 최대 속도 유지
 

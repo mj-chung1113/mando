@@ -37,7 +37,7 @@ class LatticePlanner:
         self.checkObject_dis = 1.6
         self.lane_weight_distance = 2.6
 
-        base_offset = 1.7 * 0.3 * 20
+        base_offset = 1.5 * 0.3 * 20
         self.lane_weight = [53, 52, 51, 50, 10, 11, 12, 13]
 
         offset_steps = 10
@@ -45,12 +45,12 @@ class LatticePlanner:
 
         self.lane_off_set = [
             -1*base_offset,
-            -1*base_offset + step_size * 1.4,
-            -1*base_offset + step_size * 2.3,
-            -1*base_offset + step_size * 3.8,
-            base_offset - (step_size * 3.8),
-            base_offset - (step_size * 2.3),
-            base_offset - (step_size * 1.4),
+            -1*base_offset + step_size * 1.2,
+            -1*base_offset + step_size * 2.5,
+            -1*base_offset + step_size * 3.7,
+            base_offset - (step_size * 3.7),
+            base_offset - (step_size * 2.5),
+            base_offset - (step_size * 1.2),
             base_offset,
         ]
         
@@ -132,33 +132,35 @@ class LatticePlanner:
 
     def collision_check(self, object_points, out_path):
         selected_lane = 12
-        self.lane_weight = [54, 53, 52, 51, 1, 2, 3, 4]
-        max_weight = 3000
+        self.lane_weight = [34, 33, 32, 31, 1, 2, 3, 4]
+        max_weight = 10000
         for point in object_points:
             for path_num in range(len(out_path)):
                 for path_pos in out_path[path_num].poses:
                     dis = sqrt(pow(point[0] - path_pos.pose.position.x, 2) + pow(point[1] - path_pos.pose.position.y, 2))
 
-                    if 3.5 < dis < 4.0:
+                    if 3.4 < dis < 3.8:
                         self.lane_weight[path_num] += 1
-                    elif 3.1 < dis < 3.5:
+                    elif 3.0 < dis < 3.4:
                         self.lane_weight[path_num] += 2
-                    elif 2.7 < dis < 3.1:
-                        self.lane_weight[path_num] += 4
+                    elif 2.7 < dis < 3.0:
+                        self.lane_weight[path_num] += 3
                     elif 2.4 < dis < 2.7:
-                        self.lane_weight[path_num] += 7
+                        self.lane_weight[path_num] += 4
                     elif 2.1 < dis < 2.4:
-                        self.lane_weight[path_num] += 10
+                        self.lane_weight[path_num] += 5
                     elif 1.8 < dis < 2.1:
-                        self.lane_weight[path_num] += 15
+                        self.lane_weight[path_num] += 6
                     elif 1.5 < dis < 1.8:
-                        self.lane_weight[path_num] += 21
-                    elif 1.0 < dis < 1.5:
-                        self.lane_weight[path_num] += 30
-                    elif dis < 1:
-                        self.lane_weight[path_num] += 50
-                    else:
-                        self.lane_weight[path_num] -= 1
+                        self.lane_weight[path_num] += 7
+                    elif 1.25 < dis < 1.5:
+                        self.lane_weight[path_num] += 10
+                    elif 1.0 < dis < 1.25:
+                        self.lane_weight[path_num] += 14
+                    elif dis < 1.0:
+                        self.lane_weight[path_num] += 25
+                    #else:
+                    #    self.lane_weight[path_num] -= 1
                     self.lane_weight[path_num] = min(max_weight, self.lane_weight[path_num])
 
         selected_lane = self.lane_weight.index(min(self.lane_weight))
@@ -166,33 +168,35 @@ class LatticePlanner:
     
     def return_collision_check(self, object_points, out_path):
         selected_lane = 12
-        self.lane_weight = [4, 3, 2, 1, 1, 2, 3, 4]
-        max_weight = 3000
+        self.lane_weight = [60, 45, 30, 10, 10, 30, 45, 60]
+        max_weight = 10000
         for point in object_points:
             for path_num in range(len(out_path)):
                 for path_pos in out_path[path_num].poses:
                     dis = sqrt(pow(point[0] - path_pos.pose.position.x, 2) + pow(point[1] - path_pos.pose.position.y, 2))
 
-                    if 3.5 < dis < 4.0:
+                    if 3.4 < dis < 3.8:
                         self.lane_weight[path_num] += 1
-                    elif 3.1 < dis < 3.5:
+                    elif 3.0 < dis < 3.4:
                         self.lane_weight[path_num] += 2
-                    elif 2.7 < dis < 3.1:
-                        self.lane_weight[path_num] += 4
+                    elif 2.7 < dis < 3.0:
+                        self.lane_weight[path_num] += 3
                     elif 2.4 < dis < 2.7:
-                        self.lane_weight[path_num] += 7
+                        self.lane_weight[path_num] += 4
                     elif 2.1 < dis < 2.4:
-                        self.lane_weight[path_num] += 10
+                        self.lane_weight[path_num] += 5
                     elif 1.8 < dis < 2.1:
-                        self.lane_weight[path_num] += 15
+                        self.lane_weight[path_num] += 6
                     elif 1.5 < dis < 1.8:
-                        self.lane_weight[path_num] += 21
-                    elif 1.0 < dis < 1.5:
-                        self.lane_weight[path_num] += 30
-                    elif dis < 1:
-                        self.lane_weight[path_num] += 50
-                    else:
-                        self.lane_weight[path_num] -= 1
+                        self.lane_weight[path_num] += 7
+                    elif 1.25 < dis < 1.5:
+                        self.lane_weight[path_num] += 10
+                    elif 1.0 < dis < 1.25:
+                        self.lane_weight[path_num] += 14
+                    elif dis < 1.0:
+                        self.lane_weight[path_num] += 25
+                    #else:
+                    #    self.lane_weight[path_num] -= 1
                     self.lane_weight[path_num] = min(max_weight, self.lane_weight[path_num])
 
         selected_lane = self.lane_weight.index(min(self.lane_weight))
@@ -215,16 +219,16 @@ class LatticePlanner:
         heading = atan2(2.0 * (orientation.w * orientation.z + orientation.x * orientation.y),
                         1.0 - 2.0 * (orientation.y**2 + orientation.z**2))
 
-        detection_radius = 10.0  # 부채꼴의 반지름 (장애물을 탐지할 거리)
-        detection_angle_limit = np.pi / 3  # 부채꼴의 각도 제한 (60도)
+        detection_radius = 8  # 부채꼴의 반지름 (장애물을 탐지할 거리)
+        detection_angle_limit = np.pi / 2  # 부채꼴의 각도 제한 (60도)
 
         # 목표하는 첫 번째 점의 좌표
         if len(self.local_path.poses) == 0:
             rospy.logwarn("Local path is empty.")
             return False
 
-        target_x = self.local_path.poses[0].pose.position.x
-        target_y = self.local_path.poses[0].pose.position.y
+        target_x = self.local_path.poses[5].pose.position.x
+        target_y = self.local_path.poses[5].pose.position.y
 
         # 차량과 목표 점을 연결하는 선분의 각도
         angle_to_target = atan2(target_y - ego_y, target_x - ego_x)
@@ -302,7 +306,7 @@ class LatticePlanner:
 
     def filter_dynamic_objects(self, current_points):
         """
-        10프레임 중 3프레임에서 장애물이 발견되면 정적 장애물로 간주.
+        8프레임 중 3프레임에서 장애물이 발견되면 정적 장애물로 간주.
         """
         static_objects = []
         threshold_distance = 0.8  # 동적/정적 객체를 구분할 거리 기준
@@ -332,7 +336,7 @@ class LatticePlanner:
                     self.prev_object_frame_counts[j] = min(self.prev_object_frame_counts[j] + 1, max_track_frames)
                     found_match = True
 
-                    # 정적 장애물로 간주할 조건 (10프레임 중 3프레임 이상 발견)
+                    # 정적 장애물로 간주할 조건 (8프레임 중 3프레임 이상 발견)
                     if self.prev_object_frame_counts[j] >= required_frames:
                         is_static = True
                         static_objects.append(current_point)
@@ -370,8 +374,8 @@ class LatticePlanner:
         heading = atan2(2.0 * (orientation.w * orientation.z + orientation.x * orientation.y),
                         1.0 - 2.0 * (orientation.y**2 + orientation.z**2))
 
-        abs_x = ego_x + cos(heading) * rel_x - sin(heading) * rel_y
-        abs_y = ego_y + sin(heading) * rel_x + cos(heading) * rel_y
+        abs_x = ego_x + cos(heading) * (rel_x+1.33) - sin(heading) * rel_y
+        abs_y = ego_y + sin(heading) * (rel_x+1.33) + cos(heading) * rel_y
         abs_z = ego_z + rel_z  # z는 일반적으로 사용되지 않지만 포함
 
         return abs_x, abs_y, abs_z
