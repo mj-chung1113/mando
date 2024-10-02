@@ -287,8 +287,8 @@ class pure_pursuit:
         self.is_look_forward_point = False
 
         # 차량의 앞바퀴 위치를 계산 (차량의 중심으로부터 wheel_base 만큼 앞쪽으로 이동)
-        front_axle_x = self.current_postion.x + cos(self.vehicle_yaw) * 1.0
-        front_axle_y = self.current_postion.y + sin(self.vehicle_yaw) * 1.0
+        front_axle_x = self.current_postion.x + cos(self.vehicle_yaw) * 0
+        front_axle_y = self.current_postion.y + sin(self.vehicle_yaw) * 0
         front_axle_position = [front_axle_x, front_axle_y]
 
         translation = [front_axle_x, front_axle_y]
@@ -383,7 +383,7 @@ class pure_pursuit:
 
 class pidControl:
     def __init__(self):
-        self.p_gain = 0.30
+        self.p_gain = 0.32
         self.i_gain = 0.5
         self.d_gain = 0.016
         self.prev_error = 0

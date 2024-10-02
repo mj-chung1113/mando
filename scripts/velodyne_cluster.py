@@ -56,14 +56,6 @@ class SCANCluster:
                 cluster_points.append([c_xyz_mean[0], c_xyz_mean[1], c_xyz_mean[2]])  # xyz 좌표 포함
                 cluster_intensity_averages.append(c_intensity_mean)  # intensity 평균 저장
 
-                # 클러스터의 평균 포인트로부터 최소 거리 계산
-                distance_to_cluster = np.linalg.norm(c_xyz_mean[:2])  # x, y 좌표를 기준으로 거리 계산
-                if distance_to_cluster < self.min_distance:
-                    self.min_distance = distance_to_cluster
-
-            # 평균 intensity 로그 출력
-            rospy.loginfo(f"Distance Range: {dist_range}, Cluster Intensity Average: {cluster_intensity_averages}")
-
         # 차량 전방 20미터 이내 클러스터의 경고 신호 계산 및 퍼블리시
         self.calculate_warn_signal(cluster_points)
 
@@ -86,16 +78,16 @@ class SCANCluster:
             x, y, z = point
             distance = np.sqrt(x**2 + y**2)
 
-            if x > 0 and -2.3 < y < 2.3 and distance < 28:  # 전방이고 21.33m 이내
+            if x > 0 and -2.3 < y < 2.3 and distance < 40:  # 전방이고 21.33m 이내
                 angle = abs(np.arctan2(y, x))  # 차량 전방과의 각도 (라디안)
                 angle_scale = max(0, 1 - (angle / (np.pi / 3)))  # ±60도 기준으로 스케일링
 
                 # 거리가 3.33 미터보다 가까운 경우 warn을 1로 설정
-                if distance <= 9:
+                if distance <= 10:
                     distance_scale = 1
                 else:
                     # 거리는 3.33m에서 21.33m로 스케일링. 가까울수록 warn이 1, 멀수록 0
-                    distance_scale =  min(1.00,max(0.001, 1 - ((distance - 9) / (26 - 9))))
+                    distance_scale =  min(1.00,max(0.001, 1 - ((distance - 10) / (40 - 10))))
 
                 # 각도와 거리 스케일링을 곱하여 warn 값을 계산
                 current_warn = angle_scale * distance_scale
@@ -161,7 +153,7 @@ class SCANCluster:
             angle = np.arctan2(point[1], point[0])
 
             # point[0] = x / point[1] = y / point[2] = z / point[3] = intensity
-            if -2 < point[0] < 45 and -5 < point[1] < 5 and (1.5 < dist < 45) and (-1.4 < point[2] < 0.1):
+            if -2 < point[0] < 45 and -5 < point[1] < 5 and (0.6 < dist < 45) and (-1.4 < point[2] < 0.1):
                 point_list.append((point[0], point[1], 0, point[3], dist, angle))
 
         point_np = np.array(point_list, np.float32)
