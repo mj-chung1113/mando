@@ -3,9 +3,9 @@
 
 import rospy
 from sensor_msgs.msg import CompressedImage, Image
-from mando.msg import mission, obstacle  # 사용자 정의 메시지 임포트 
+from mando.msg import mission, obstacle
 from cv_bridge import CvBridge, CvBridgeError
-from std_msgs.msg import String, Int16
+from std_msgs.msg import Int16, Bool, Float32
 
 import cv2
 import numpy as np
@@ -20,228 +20,220 @@ class YoloNode:
         self.image_sub = rospy.Subscriber("/image_jpeg/compressed", CompressedImage, self.image_callback)
         self.mode_sub = rospy.Subscriber("/mission", mission, self.mission_callback)
         
-        self.obstacle_pub = rospy.Publisher("/obstacle_info", obstacle, queue_size=5)  # 새로운 퍼블리셔
-        self.traffic_color_pub = rospy.Publisher("/traffic_light_color", Int16, queue_size=10 )
-        
+        self.obstacle_pub = rospy.Publisher("/obstacle_info", obstacle, queue_size=5)
+        self.traffic_color_pub = rospy.Publisher("/traffic_light_color", Int16, queue_size=10)
+        self.stop_pub = rospy.Publisher("/stop_signal", Bool, queue_size=1)
+        self.roi_image_pub = rospy.Publisher("/roi_visualization", Image, queue_size=5)
+        self.speed_adjust_pub = rospy.Publisher("/speed_adjust_signal", Float32, queue_size=1)
+
         self.bridge = CvBridge()
-        self.roi_image_pub = rospy.Publisher("/roi_visualization", Image, queue_size=5)  # ROI 시각화 퍼블리셔 추가
 
         # GPU 사용 설정
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.path = 'yolov8n.pt'
-        self.model = YOLO(self.path)
-        self.model = self.model.to(self.device)
-        # YOLO 모델을 GPU에 로드
-        #self.general_model = YOLO('/home/yolov8n.pt').to(self.device)
         
-        self.confidence_threshold = 0.4  # 신뢰도 임계값
+        self.model = YOLO('yolov8n.pt').to(self.device)  # YOLO 모델 로드
+        
+        self.confidence_threshold = 0.2
         self.mission_info = mission()
         self.obstacle = obstacle()
-        rospy.loginfo("YOLO node has been started.")
         
         self.timer = rospy.Timer(period=rospy.Duration(0.1), callback=self.timer_callback)
         self.latest_frame = None
-
         self.previous_boxes = {}
-        self.previous_collision_probabilities = []
-
-        #신호등 처리 
-        self.traffic_color=0
         self.recent_traffic_colors = deque(maxlen=5)
-        self.final_color = 0 
 
-    #cuda 사용을 위한 이미지 전처리 
+        rospy.loginfo("YOLO node has been started.")
+
+    # CUDA 사용을 위한 이미지 전처리
     def preprocess_image(self, frame):
-        # 이미지가 비어있는지 확인
         if frame is None or frame.size == 0:
             rospy.logerr("Preprocess image received an empty frame.")
             return None
 
-        # 이미지 크기를 (640, 640)으로 조정
         resized_frame = cv2.resize(frame, (640, 640))
-
-        # 이미지를 RGB로 변환 (OpenCV는 기본적으로 BGR 형식이므로 변환 필요)
         rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
-
-        # 이미지를 (H, W, C)에서 (C, H, W)로 변환
         rgb_frame = np.transpose(rgb_frame, (2, 0, 1))
-
-        # PyTorch 텐서로 변환하고 배치 차원을 추가
         tensor_frame = torch.from_numpy(rgb_frame).float().unsqueeze(0)
-
-        # 0-255 범위를 0-1로 정규화
         tensor_frame /= 255.0
-        return tensor_frame.to(self.device)
         
+        return tensor_frame.to(self.device)
+
+    # ROI 설정
     def set_roi_by_mission(self, mission_num, frame_width, frame_height):
- 
         if mission_num == 2 or mission_num == 6: 
-            # 신호등 
             roi_x1 = int(frame_width * 0.44)
             roi_x2 = int(frame_width * 0.56)
-            roi_y1 = int(frame_height * 0.36)
+            roi_y1 = int(frame_height * 0.30)
             roi_y2 = int(frame_height * 0.50)
-        
-        elif mission_num not in [2,6]:
-            # 동적장애물
-            roi_x1 = int(frame_width)
-            roi_x2 = int(frame_width)
-            roi_y1 = int(frame_height * 0.35)
-            roi_y2 = int(frame_height * 0.85)
-        
         else:
-            # 기본 ROI 설정: 이미지 전체 영역
-            roi_x1 = int(frame_width * 0.05)
-            roi_x2 = int(frame_width * 0.95)
-            roi_y1 = int(frame_height * 0.35)
-            roi_y2 = int(frame_height * 0.85)
-        
+            roi_x1 = int(frame_width * 0.44)
+            roi_x2 = int(frame_width * 0.56)
+            roi_y1 = int(frame_height * 0.30)
+            roi_y2 = int(frame_height * 0.50)
+
         if self.latest_frame is not None:
             self.visualize_and_publish_roi(self.latest_frame, roi_x1, roi_y1, roi_x2, roi_y2)
+
         return roi_x1, roi_y1, roi_x2, roi_y2
-    
-    '''
-    #충돌 확률 계산 알고리즘 
-    def calculate_distance_ratio(self, x, y, center_x, center_y, width, height):
-        distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
-        max_distance = ((width / 2) ** 2 + (height / 2) ** 2) ** 0.5
-        return distance / max_distance
 
-    #충돌 확률 계산 알고리즘 
-    def get_closest_point_to_center(self, x1, y1, x2, y2, center_x, center_y):
-        points = [(x1, y1), (x1, y2), (x2, y1), (x2, y2)]
-        closest_point = min(points, key=lambda p: (p[0] - center_x) ** 2 + (p[1] - center_y) ** 2)
-        return closest_point
-    
-    #바운딩 박스 크기 계산 
-    def calculate_box_area(self, x1, y1, x2, y2):
-        return (x2 - x1) * (y2 - y1)
+    # IOU 계산 함수 추가
+    def calculate_iou(self, x1, y1, x2, y2, roi_x1, roi_y1, roi_x2, roi_y2):
+        overlap_x1 = max(x1, roi_x1)
+        overlap_y1 = max(y1, roi_y1)
+        overlap_x2 = min(x2, roi_x2)
+        overlap_y2 = min(y2, roi_y2)
 
-    def calculate_area_change_rate(self, object_id, current_area):
-        if object_id in self.previous_boxes:
-            previous_area = self.previous_boxes[object_id]
-            area_change_rate = 5*(current_area - previous_area) / max(previous_area, 1)
-        else:
-            area_change_rate = 0.01
+        overlap_width = max(0, overlap_x2 - overlap_x1)
+        overlap_height = max(0, overlap_y2 - overlap_y1)
+        overlap_area = overlap_width * overlap_height
 
-        # 현재 프레임의 바운딩 박스 크기를 저장
-        self.previous_boxes[object_id] = current_area
-        return area_change_rate
+        box_area = (x2 - x1) * (y2 - y1)
+        roi_area = (roi_x2 - roi_x1) * (roi_y2 - roi_y1)
 
-    #장애물 정보 관리 ,pub
-    def publish_obstacle_info(self, classn, collision):
-        
-        self.obstacle.classnum = classn
-        self.obstacle.collision_probability = collision
-        self.obstacle_pub.publish(self.obstacle)
-        rospy.loginfo(f"Published obstacle info: classnum={self.obstacle.classnum}, collision_probability={self.obstacle.collision_probability}")
+        union_area = box_area + roi_area - overlap_area
+        if union_area == 0:
+            return 0.0
 
-    #바운딩박스 short term 예측 
-    def predict_next_positions(self, results):
-        predicted_boxes = []
-        for boxes in results:
-            for box in boxes:
-                object_id = int(box.cls.item())
-                current_box = box.xyxy[0].cpu().numpy()
-                predicted_boxes.append((object_id, current_box, box.conf, box.cls))
-        return predicted_boxes
-    #충돌 확률 계산 알고리즘 
-    def calculate_collision_probability(self, frame):
-        try:
-            # 이미지 전처리 및 GPU로 이동
-            tensor_frame = self.preprocess_image(frame)
-            results = self.model(tensor_frame)
-            #results = self.general_model(tensor_frame)
-            filtered_results = self.filter_results_by_confidence(results)
+        iou = overlap_area / union_area
+        return iou
 
-            if not filtered_results or all(len(boxes) == 0 for boxes in filtered_results):
-                rospy.loginfo("No objects detected. Collision probability set to 0.")
-                self.publish_obstacle_info(888, 0.0)
-            else:
-                predicted_boxes = self.predict_next_positions(filtered_results)
-                classnum, highest_collision_probability = self.compute_highest_collision_probability(predicted_boxes, frame)
-                self.publish_obstacle_info(classnum, highest_collision_probability)
-        except Exception as e:
-            rospy.logerr(f"Error during YOLO processing: {e}")
-    
-    #충돌 확률 계산 알고리줌 - 최고 확률 반환 
-    def compute_highest_collision_probability(self, predicted_boxes, frame):
-        height, width, _ = frame.shape
-        center_x, center_y = width//2, int(height *0.66)
-        if self.mission_info.mission_num == 7 :
-            roi_x1 = int(width* 0.1)
-            roi_x2 = int(width * 0.9)
-            roi_y1 = int(height * 0.35 )
-            roi_y2 = int(height * 0.9)
-        else : 
-            roi_x1, roi_y1, roi_x2, roi_y2 = self.set_roi_by_mission(self.mission_info.mission_num, width, height)
-       
-        #특정 roi로 자르기 
-        roi_area = self.calculate_box_area(roi_x1, roi_y1, roi_x2, roi_y2)
-        highest_collision_probability = 0
-        best_classnum = 888  # 초기값: classnum
-
-        for object_id, box, conf, cls in predicted_boxes:
-            x1, y1, x2, y2 = map(int, box)
-
-            #박스의 4꼭짓점 중 roi 안으로 들어온 부분 
-            overlap_x1 = max(x1, roi_x1)
-            overlap_y1 = max(y1, roi_y1)
-            overlap_x2 = min(x2, roi_x2)
-            overlap_y2 = min(y2, roi_y2)
-            
-            # 바운딩 박스가 ROI 내에서 차지하는 비율 계산
-            box_area = self.calculate_box_area(x1, y1, x2, y2)
-            occupancy_ratio = box_area / roi_area
-            if occupancy_ratio >= 1.4:
-                best_classnum = int(cls.item())
-                return best_classnum, 100.0
-                
-            if overlap_x1 < overlap_x2 and overlap_y1 < overlap_y2:
-                
-                overlap_area = self.calculate_box_area(overlap_x1, overlap_y1, overlap_x2, overlap_y2)
-                box_iou = overlap_area / box_area  # IoU 기반으로 겹치는 영역 비율 계산
-
-
-                # 바운딩 박스 중심점과 이미지 중심점 사이의 거리 비율 계산
-                closest_point = self.get_closest_point_to_center(x1, y1, x2, y2, center_x, center_y)
-                distance_ratio = self.calculate_distance_ratio(closest_point[0], closest_point[1], center_x, center_y, width, height)
-                
-                
-                #박스 크기 변화율이 클 수록 충돌 확률이 높음 
-                area_change_rate = self.calculate_area_change_rate(object_id, box_area)
-                
-                if (distance_ratio <= 0.05 or box_iou >= 0.95):
-                    collision_probability = (4.5 * (1 - distance_ratio) + 3.5 * box_iou + 1.5 * area_change_rate) * occupancy_ratio / 9.5 * 100.0 
-                elif (self.mission_info.mission_num == 51):
-                    collision_probability = (3.5 * (1 - distance_ratio) + 4.5 * box_iou) * occupancy_ratio / 8 * 100.0    
-                else : 
-                    collision_probability = (4.5 * (1 - distance_ratio) + 3.5 * box_iou) * occupancy_ratio / 8 * 100.0 
-                
-                if (self.mission_info.mission_num == 5):
-                        collision_probability = (1.5 * (1 - distance_ratio) + 3.0 * box_iou)/ 4.5 * 100.0    
-                if self.obstacle.classnum==0 or self.obstacle.classnum==1 or self.obstacle.classnum==3 :
-                        collision_probability = (4.5 * (1 - distance_ratio) + 2.0 * box_iou ) * 13 * occupancy_ratio / 6.5 * 100.0
-                collision_probability = max(0.0, min(collision_probability, 100))  # 0에서 100 사이로 제한
-                
-                if collision_probability > highest_collision_probability:
-                    highest_collision_probability = collision_probability
-                    best_classnum = int(cls.item())
-
-
-        return best_classnum, highest_collision_probability 
-    
-    # 신뢰도 낮은 것과 class_number가 0, 1, 2 3 가 아닌 것을 버리기
+    # 신뢰도 낮은 것과 class_number가 0, 1, 2, 3가 아닌 것을 버리기
     def filter_results_by_confidence(self, results):
-        allowed_classes = {0, 1, 2, 3, 888}  # 허용된 클래스 번호 집합
+        allowed_classes = {0, 1, 2, 3, 888}
         filtered_results = []
         for result in results:
             filtered_boxes = [box for box in result.boxes if box.conf > self.confidence_threshold and int(box.cls.item()) in allowed_classes]
             filtered_results.append(filtered_boxes)
         return filtered_results
 
+    # 보행자 충돌 확률 계산 (두 가지 방법의 평균)
+    def calculate_collision_probability(self, frame):
+        original_height, original_width = frame.shape[:2]
+
+        tensor_frame = self.preprocess_image(frame)
+        results = self.model(tensor_frame)
+        filtered_results = self.filter_results_by_confidence(results)
+
+        pedestrian_detected = False
+        total_collision_probability = 0.0
+        num_methods = 2  # 두 가지 방법 사용
+
+        # ROI 설정 및 가중치
+        basic_roi_x1, basic_roi_x2, basic_roi_y1, basic_roi_y2 = int(original_width * 0.10), int(original_width * 0.90), int(original_height * 0.35), int(original_height * 0.85)
+        road_roi_x1, road_roi_x2, road_roi_y1, road_roi_y2 = int(original_width * 0.30), int(original_width * 0.70), int(original_height * 0.40), int(original_height * 0.85)
+        line_roi_x1, line_roi_x2, line_roi_y1, line_roi_y2 = int(original_width * 0.40), int(original_width * 0.60), int(original_height * 0.50), int(original_height * 0.85)
+
+        basic_roi_weight = 1
+        road_roi_weight = 3
+        line_roi_weight = 5
+
+        for result in filtered_results:
+            for box in result:
+                class_id = int(box.cls.item())
+                if class_id != 0:
+                    continue
+
+                pedestrian_detected = True
+
+                x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
+                x1 = int(x1 * original_width / 640)
+                x2 = int(x2 * original_width / 640)
+                y1 = int(y1 * original_height / 640)
+                y2 = int(y2 * original_height / 640)
+
+                # 방법 1: 중심점 거리 기반 계산
+                center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
+                distance_ratio = self.calculate_distance_ratio(center_x, center_y, original_width // 2, original_height // 2, original_width, original_height)
+                collision_probability_distance = (1 - distance_ratio) * 100.0
+
+                # 방법 2: ROI 포함 비율 기반 계산 (각 ROI 가중치 적용)
+                basic_overlap_area = self.calculate_overlap_area(x1, y1, x2, y2, basic_roi_x1, basic_roi_y1, basic_roi_x2, basic_roi_y2)
+                road_overlap_area = self.calculate_overlap_area(x1, y1, x2, y2, road_roi_x1, road_roi_y1, road_roi_x2, road_roi_y2)
+                line_overlap_area = self.calculate_overlap_area(x1, y1, x2, y2, line_roi_x1, line_roi_y1, line_roi_x2, line_roi_y2)
+
+                box_area = (x2 - x1) * (y2 - y1)
+                basic_ratio = (basic_overlap_area / box_area) * basic_roi_weight if box_area > 0 else 0
+                road_ratio = (road_overlap_area / box_area) * road_roi_weight if box_area > 0 else 0
+                line_ratio = (line_overlap_area / box_area) * line_roi_weight if box_area > 0 else 0
+                collision_probability_roi = (basic_ratio + road_ratio + line_ratio) * 100.0 / (basic_roi_weight + road_roi_weight + line_roi_weight)
+
+                # 충돌 확률 계산 (각 방법의 평균 사용)
+                collision_probability = (collision_probability_distance + collision_probability_roi) / num_methods
+
+                # 각 방법의 충돌 확률을 로그로 출력
+                # rospy.loginfo(f"방법 1 (중심점 거리 기반) 충돌 가능성: {collision_probability_distance:.2f}%")
+                # rospy.loginfo(f"방법 2 (ROI 기반) 충돌 가능성: {collision_probability_roi:.2f}%")
+                # rospy.loginfo(f"최종 충돌 가능성: {collision_probability:.2f}%")
+
+                # 최종 평균 충돌 확률 갱신
+                total_collision_probability = (collision_probability_distance + collision_probability_roi) / num_methods
+
+                # 객체 시각화
+                label_text = f"Person, Conf: {box.conf.item():.2f}"
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(frame, label_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+
     
-    '''
+        # 충돌 확률에 따른 행동 결정
+        if pedestrian_detected:
+            
+            self.speed_adjust_pub.publish(0.01*total_collision_probability)
+            rospy.loginfo(f"보행자 검출, 충돌 확률 : {total_collision_probability}")
+        else:
+            # 보행자가 없을 경우 신호 해제 및 속도 원상 복귀
+            
+            self.speed_adjust_pub.publish(1.0)
+            rospy.loginfo("보행자 검출되지 않음.")
+
+
+    # 보행자 이미지 크기에 대한 가중치 계산
+    def calculate_size_weight(self, box_area, frame_area, min_weight=0.2, max_weight=1.0):
+        size_ratio = box_area / frame_area
+        weight = size_ratio * max_weight
+        # 최소 가중치와 최대 가중치 사이로 제한
+        weight = max(min_weight, min(weight, max_weight))
+        return weight
+
+    # 중심점 거리 비율 계산
+    def calculate_distance_ratio(self, x, y, center_x, center_y, width, height):
+        distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
+        max_distance = ((width / 2) ** 2 + (height / 2) ** 2) ** 0.5
+        return distance / max_distance
+
+    # 겹치는 영역 계산
+    def calculate_overlap_area(self, x1, y1, x2, y2, roi_x1, roi_y1, roi_x2, roi_y2):
+        overlap_x1 = max(x1, roi_x1)
+        overlap_y1 = max(y1, roi_y1)
+        overlap_x2 = min(x2, roi_x2)
+        overlap_y2 = min(y2, roi_y2)
+
+        overlap_width = max(0, overlap_x2 - overlap_x1)
+        overlap_height = max(0, overlap_y2 - overlap_y1)
+
+        return overlap_width * overlap_height
+
+    def visualize_and_publish_roi(self, frame, roi_x1, roi_y1, roi_x2, roi_y2):
+        visualized_frame = frame.copy()
+        cv2.rectangle(visualized_frame, (roi_x1, roi_y1), (roi_x2, roi_y2), (20, 20, 20), 2)
+        try:
+            roi_image_msg = self.bridge.cv2_to_imgmsg(visualized_frame, "bgr8")
+            self.roi_image_pub.publish(roi_image_msg)
+        except CvBridgeError as e:
+            rospy.logerr(f"Could not convert ROI visualized image: {e}")
+
+    def image_callback(self, data):
+        try:
+            frame = self.bridge.compressed_imgmsg_to_cv2(data, "bgr8")
+            if frame is not None:
+                self.latest_frame = frame
+            else:
+                rospy.logwarn("Received an empty frame. Skipping frame update.")
+        except CvBridgeError as e:
+            rospy.logerr(f"Could not convert image: {e}")
+            self.latest_frame = None
+
+    def mission_callback(self, msg):
+        self.mission_info = msg
      # 신호등 색상 결정
     def decide_traffic_light_color(self):
         if self.recent_traffic_colors:
@@ -291,79 +283,40 @@ class YoloNode:
         rospy.loginfo(f"Final traffic light color: {self.final_color}")
 
     
-    #이미지 받아오기 콜백 
-    def image_callback(self, data):
-        try:
-            frame = self.bridge.compressed_imgmsg_to_cv2(data, "bgr8")
-            self.latest_frame = frame
-        except CvBridgeError as e:
-            rospy.logerr(f"Could not convert image: {e}")
-    
-    #mission number 수신용 콜백함수 
-    def mission_callback(self, msg):
-        try:
-            self.mission_info = msg
-        except ValueError as e:
-            rospy.logerr(f"Invalid driving mode value: {self.mission_info.mission_num}")
-    
-    #mission number 에 따라 다르게 동작하는 로직  
-    def timer_callback(self, event): 
-        
+    def timer_callback(self, event):
         if self.latest_frame is not None:
+            frame = self.latest_frame.copy()
+            traffic = self.latest_frame.copy()
+            # ROI 시각화
+            basic_roi_x1, basic_roi_x2, basic_roi_y1, basic_roi_y2 = int(frame.shape[1] * 0.10), int(frame.shape[1] * 0.90), int(frame.shape[0] * 0.35), int(frame.shape[0] * 0.85)
+            road_roi_x1, road_roi_x2, road_roi_y1, road_roi_y2 = int(frame.shape[1] * 0.30), int(frame.shape[1] * 0.70), int(frame.shape[0] * 0.40), int(frame.shape[0] * 0.85)
+            line_roi_x1, line_roi_x2, line_roi_y1, line_roi_y2 = int(frame.shape[1] * 0.40), int(frame.shape[1] * 0.60), int(frame.shape[0] * 0.50), int(frame.shape[0] * 0.85)
+
+            # ROI 영역을 시각적으로 표시
+            cv2.rectangle(frame, (basic_roi_x1, basic_roi_y1), (basic_roi_x2, basic_roi_y2), (0, 255, 0), 2)
+            cv2.rectangle(frame, (road_roi_x1, road_roi_y1), (road_roi_x2, road_roi_y2), (255, 0, 0), 2)
+            cv2.rectangle(frame, (line_roi_x1, line_roi_y1), (line_roi_x2, line_roi_y2), (0, 255, 255), 2)
+
+            # 충돌 확률 계산
+            self.calculate_collision_probability(frame)
+            
             roi_x1, roi_y1, roi_x2, roi_y2 = self.set_roi_by_mission(self.mission_info.mission_num, 
                                                                             self.latest_frame.shape[1], 
                                                                             self.latest_frame.shape[0])
-            frame = self.latest_frame.copy()
-            roi= frame[roi_y1:roi_y2,roi_x1:roi_x2]
-            if self.mission_info.mission_num in [2,6]:  # 신호등 탐지 미션
-                #self.calculate_collision_probability(self.latest_frame.copy())
-                # ROI 설정
-                
-                roi_x1, roi_y1, roi_x2, roi_y2 = self.set_roi_by_mission(self.mission_info.mission_num, 
-                                                                            self.latest_frame.shape[1], 
-                                                                            self.latest_frame.shape[0])
-                frame = self.latest_frame.copy()
-                roi= frame[roi_y1:roi_y2,roi_x1:roi_x2]
-                # 신호등 검출 및 색상 분석
-                self.detect_traffic_light_color(roi)
-            '''
-            if self.mission_info.mission_num not in [2,6]:  # 끼어들기, 차간간격
-                self.calculate_collision_probability(self.latest_frame)
+            roi= traffic[roi_y1:roi_y2,roi_x1:roi_x2]
+            # 신호등 검출 및 색상 분석
+            self.detect_traffic_light_color(roi)
+            # OpenCV 창에 이미지 표시
+            cv2.imshow("YOLO & Collision Detection with ROIs", frame)
+            cv2.waitKey(1)
 
-            '''
-        else: 
-            return
-                #self.calculate_collision_probability(self.latest_frame)
-            
-        self.latest_frame = None
-    
-    def visualize_and_publish_roi(self, frame, roi_x1, roi_y1, roi_x2, roi_y2):
-        """
-        현재 설정된 ROI를 이미지에 시각화하고 퍼블리시하는 함수
-        """
-        # ROI를 시각화 (이미지에 사각형 그리기)
-        visualized_frame = frame.copy()
-        cv2.rectangle(visualized_frame, (roi_x1, roi_y1), (roi_x2, roi_y2), (20, 20, 20), 2)
-        
-        try:
-            # 이미지를 ROS 메시지로 변환
-            roi_image_msg = self.bridge.cv2_to_imgmsg(visualized_frame, "bgr8")
-            
-            # 퍼블리시
-            self.roi_image_pub.publish(roi_image_msg)
-            rospy.loginfo("Published ROI visualized image.")
-        except CvBridgeError as e:
-            rospy.logerr(f"Could not convert ROI visualized image: {e}")
-
-        
 def main():
     yolo_node = YoloNode()
     try:
         rospy.spin()
     except KeyboardInterrupt:
         rospy.loginfo("Shutting down YOLO node.")
+        cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     main()
-
-    ##waw

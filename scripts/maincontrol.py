@@ -36,7 +36,8 @@ class pure_pursuit:
         rospy.Subscriber("/mission", mission, self.mission_callback)
         rospy.Subscriber("/stop_signal", Bool, self.stop_callback)
         rospy.Subscriber("/warn_signal", Float32, self.warn_callback)
-
+        rospy.Subscriber("/speed_adjust_signal", Float32, self.speed_adjust_callback)
+        rospy.Subscriber("/lattice_on", Bool, self.lattice_on_callback)
         # Publisher: 차량 제어 명령을 발행
         self.ctrl_cmd_pub = rospy.Publisher('/ctrl_cmd', CtrlCmd, queue_size=1)
         self.lfd_pub = rospy.Publisher('/lfd', Float32, queue_size=2)
@@ -57,10 +58,14 @@ class pure_pursuit:
         self.is_status = False
         self.is_global_path = False
         self.is_look_forward_point = False
+ 
         self.stop_signal = False 
         self.warn_signal = 0.0
+        self.speed_adjust_factor = 0.0
         self.stop_signal_received = False  # 첫 번째 신호 처리
         self.stop_time = 0
+        self.is_mission_end = False 
+        self.lattice_on = False
 
         # 전방 목표 지점과 현재 위치 저장 변수
         self.forward_point = Point()
@@ -82,6 +87,8 @@ class pure_pursuit:
         rate = rospy.Rate(30)  # 30Hz
         while not rospy.is_shutdown():
             if self.is_path and self.is_odom and self.is_status:
+                
+                
                 # 곡률 기반 속도 계획을 반복적으로 실행, 현재 위치와 차량 헤딩 정보를 전달
                 self.velocity_list = self.vel_planning.curvedBaseVelocity(self.path, 15, self.current_postion, self.vehicle_yaw)
                 
@@ -95,9 +102,14 @@ class pure_pursuit:
                 self.current_waypoint = self.get_current_waypoint(self.path)
                 normalized_steer = abs(self.ctrl_cmd_msg.steering) / 0.6981
                 normalized_warn = 1-0.30 * self.warn_signal * self.warn_signal
+                self.speed_adjust = 1 - 0.1 * self.speed_adjust_factor * self.speed_adjust_factor
                 self.target_velocity = self.velocity_list[self.current_waypoint] * 3.6 * (1 - 0.1 * normalized_steer)
-                self.target_velocity = self.target_velocity * normalized_warn
                 
+                if self.lattice_on: 
+                    self.target_velocity = self.target_velocity * normalized_warn * self.speed_adjust *0.7
+                else: 
+                    self.target_velocity = self.target_velocity * normalized_warn * self.speed_adjust
+
                 if self.is_look_forward_point:
                     self.ctrl_cmd_msg.steering = steering
                 else: 
@@ -110,14 +122,17 @@ class pure_pursuit:
                     rospy.loginfo("미션이 종료되었습니다.")
                     self.ctrl_cmd_msg.accel = 0.0
                     self.ctrl_cmd_msg.brake = 1.0
+                    self.ctrl_cmd_msg.steering = 0.0
                     self.ctrl_cmd_pub.publish(self.ctrl_cmd_msg)
-
-                    rospy.sleep(2)#2초 대기
+                    
+                    rospy.sleep(4)#4초 대기
 
                     # 기어를 P단으로 변경
                     self.change_gear_to_p()
 
-                    break  # 미션 종료 시 루프 탈출
+                    #break  # 미션 종료 시 루프 탈출
+                
+                
 
                 ## 정지 필요시
                 if self.stop_signal:
@@ -136,6 +151,9 @@ class pure_pursuit:
                             rospy.loginfo("4 seconds passed, maintaining stop signal.")
                             self.ctrl_cmd_msg.accel = 0.0
                             self.ctrl_cmd_msg.brake = 1.0
+                            # 제어입력 메시지 Publish
+                            self.ctrl_cmd_pub.publish(self.ctrl_cmd_msg)
+                            self.lfd_pub.publish(self.lfd)
                 else:
                     self.stop_signal_received = False  # stop signal 리셋
                     output = self.pid.pid(self.target_velocity, self.ego_vehicle_status.velocity.x * 3.6)
@@ -184,7 +202,13 @@ class pure_pursuit:
         self.stop_signal = msg.data
     def warn_callback(self,msg):
         self.warn_signal = msg.data 
-    
+
+    def speed_adjust_callback(self, msg):
+        self.speed_adjust_factor = msg.data
+        rospy.loginfo(f"속도 조정 신호 수신: 속도를 {self.speed_adjust_factor * 100:.0f}%로 조정합니다.")
+    def lattice_on_callback(self, msg):
+        self.lattice_on = msg.data
+ 
     def change_gear_to_p(self):
         """기어를 P단으로 변경"""
         try:

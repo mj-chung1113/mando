@@ -78,9 +78,9 @@ class SCANCluster:
             x, y, z = point
             distance = np.sqrt(x**2 + y**2)
 
-            if x > 0 and -2.3 < y < 2.3 and distance < 40:  # 전방이고 21.33m 이내
+            if x > 0 and -4 < y < 4 and distance < 40:  # 전방이고 21.33m 이내
                 angle = abs(np.arctan2(y, x))  # 차량 전방과의 각도 (라디안)
-                angle_scale = max(0, 1 - (angle / (np.pi / 3)))  # ±60도 기준으로 스케일링
+                angle_scale = max(0, 1 - (angle / (np.pi / 2)))  # ±60도 기준으로 스케일링
 
                 # 거리가 3.33 미터보다 가까운 경우 warn을 1로 설정
                 if distance <= 10:
@@ -117,11 +117,11 @@ class SCANCluster:
         거리 범위에 따라 DBSCAN의 eps와 min_samples 파라미터를 설정합니다.
         """
         return {
-            (2, 5): {'eps': 0.1, 'min_samples': 30},
-            (5, 10): {'eps': 0.18, 'min_samples': 16},  # intensity 포함 -> eps 값 조정
-            (10, 20): {'eps': 0.34, 'min_samples': 11},
-            (20, 30): {'eps': 0.45, 'min_samples': 9},
-            (30, 40): {'eps': 0.47, 'min_samples': 7},
+            (2, 5): {'eps': 0.1, 'min_samples': 25},
+            (5, 10): {'eps': 0.15, 'min_samples': 14},  # intensity 포함 -> eps 값 조정
+            (10, 20): {'eps': 0.34, 'min_samples': 9},
+            (20, 30): {'eps': 0.45, 'min_samples': 7},
+            (30, 40): {'eps': 0.47, 'min_samples': 5},
         }
 
     def publish_point_cloud(self, points, intensity_averages):
@@ -143,7 +143,7 @@ class SCANCluster:
         points_with_intensity = [[p[0], p[1], p[2], intensity] for p, intensity in zip(points, intensity_averages)]
         pc2_msg = pc2.create_cloud(header, fields, points_with_intensity)
 
-        # PointCloud2 메시지 발행
+        # PointCloud2 메시지 발행s
         self.clusterpoints_pub.publish(pc2_msg)
 
     def pointcloud2_to_xyz(self, cloud_msg):
@@ -153,7 +153,7 @@ class SCANCluster:
             angle = np.arctan2(point[1], point[0])
 
             # point[0] = x / point[1] = y / point[2] = z / point[3] = intensity
-            if -2 < point[0] < 45 and -5 < point[1] < 5 and (0.6 < dist < 45) and (-1.4 < point[2] < 0.1):
+            if -1 < point[0] < 45 and -7 < point[1] < 7 and (0.8 < dist < 45) and (-1.52 < point[2] < 0.4):
                 point_list.append((point[0], point[1], 0, point[3], dist, angle))
 
         point_np = np.array(point_list, np.float32)

@@ -26,13 +26,14 @@ class Stopsignal:
                 # 특정 미션 구간에서 일단 정지
                 if self.mission_info.mission_num in [2, 6]:
                     self.to_stop = True
-                    if self.traffic_color == 1:
+                    if self.traffic_color == 1 or self.traffic_color == 0:
                         # 신호등이 빨간불일 때 계속 정지
                         self.to_stop = True
+                        
                     elif self.traffic_color ==3:
                         # 신호등이 초록불일 때 정지 해제
                         self.to_stop = False
-                elif self.mission_info.mission_num == 10:
+                elif self.mission_info.mission_num == 11:
                     self.to_stop = True    
                 else: 
                     # 해당 미션 구간이 아니면 정지 신호 해제
