@@ -125,13 +125,8 @@ class pure_pursuit:
                     self.ctrl_cmd_msg.steering = 0.0
                     self.ctrl_cmd_pub.publish(self.ctrl_cmd_msg)
                     
-                    rospy.sleep(4)#4초 대기
-
-                    # 기어를 P단으로 변경
-                    self.change_gear_to_p()
-
-                    #break  # 미션 종료 시 루프 탈출
-                
+                    if self.ego_vehicle_status.velocity.x < 1:
+                        self.change_gear_to_p()
                 
 
                 ## 정지 필요시
@@ -191,7 +186,7 @@ class pure_pursuit:
     def mission_callback(self, msg):
         try:
             self.mission_info = msg
-            if self.mission_info.mission_num == 11:  # 예시로 미션 번호가 11이면 종료로 처리
+            if self.mission_info.mission_num == 10:  # 예시로 미션 번호가 11이면 종료로 처리
                 self.is_mission_end = True
             else:
                 self.is_mission_end = False
@@ -348,10 +343,16 @@ class pure_pursuit:
 
         # LFD 조건을 만족하는 포인트가 없을 때, 가장 가까운 포인트 사용
         if not self.is_look_forward_point and closest_point is not None:
-            self.forward_point = closest_point
-            self.is_look_forward_point = True
-            rospy.logwarn("No point found that satisfies LFD. Using closest point as forward point.")
-
+            if self.mission_info.mission_num == 10: 
+                
+                
+                self.forward_point = self.path.poses[-1].pose.position
+                self.is_look_forward_point = True
+            else:    
+                self.forward_point = closest_point
+                self.is_look_forward_point = True
+                rospy.logwarn("No point found that satisfies LFD. Using closest point as forward point.")
+        
         # 간단한 Stanley 제어 각도 계산 예제
         theta = atan2(local_path_point[1], local_path_point[0])
         e = local_path_point[1]

@@ -65,7 +65,7 @@ class LatticePlanner:
         # 메인 로직 구문
         while not rospy.is_shutdown():
             if self.is_path and self.is_odom and self.is_obj:
-                if self.mission_info.mission_num not in [2,6,10,11] and self.checkObject(self.local_path, self.object_points):
+                if self.mission_info.mission_num not in [2,6,10] and self.checkObject(self.local_path, self.object_points):
                     
                     lattice_path = self.latticePlanner(self.local_path, self.odom_msg)
                     lattice_path_index = self.collision_check(self.object_points, lattice_path)
@@ -81,7 +81,7 @@ class LatticePlanner:
                     self.lattice_on_pub.publish(True)
                 else:
                     
-                    if self.mission_info.mission_num not in [2,6,10,11] and self.return_check(): #복귀하는 길에 전방 체크 
+                    if self.mission_info.mission_num not in [2,6,10] and self.return_check(): #복귀하는 길에 전방 체크 
                         lattice_path = self.latticePlanner(self.local_path, self.odom_msg)
                         lattice_path_index = self.return_collision_check(self.object_points, lattice_path)
                         selected_lattice_path = lattice_path[lattice_path_index]
