@@ -44,8 +44,8 @@ class LatticePlanner:
         self.lane_weight_distance = 2.6
 
         base_offset = 1.5 * 0.3 * 20
-        self.lane_weight = [53, 52, 51, 50, 10, 11, 12, 13]
-        self.return_weight = [60, 45, 30, 10, 10, 30, 45, 60]
+        self.lane_weight = [53, 52, 51, 50,5,5, 10, 11, 12, 13]
+        self.return_weight = [60, 45, 30, 10,5,5, 10, 30, 45, 60]
         offset_steps = 10
         step_size = base_offset * 2 / offset_steps
 
@@ -54,6 +54,8 @@ class LatticePlanner:
             -1*base_offset + step_size * 1.2,
             -1*base_offset + step_size * 2.4,
             -1*base_offset + step_size * 3.6,
+            -1*base_offset + step_size * 4.8,
+             base_offset - (step_size * 4.8),
             base_offset - (step_size * 3.6),
             base_offset - (step_size * 2.4),
             base_offset - (step_size * 1.2),
@@ -211,7 +213,7 @@ class LatticePlanner:
 
     def collision_check(self, object_points, out_path):
         selected_lane = 12
-        self.lane_weight = [120, 100, 80, 70, 5, 10, 20, 30]  # 초기 레인별 가중치
+        self.lane_weight = [120, 100, 80, 70,4,4, 5, 10, 20, 30]  # 초기 레인별 가중치
         max_weight = 10000  # 최대 가중치
 
         for point in object_points:
@@ -243,7 +245,7 @@ class LatticePlanner:
 
     def return_collision_check(self, object_points, out_path):
         selected_lane = 12
-        self.return_weight = [61, 45, 30, 10, 10, 30, 45, 60]
+        self.return_weight = [61, 45, 30, 10,5,5, 10, 30, 45, 60]
         max_weight = 10000
         for point in object_points:
             for path_num in range(len(out_path)):
