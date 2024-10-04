@@ -106,7 +106,7 @@ class pure_pursuit:
                 self.target_velocity = self.velocity_list[self.current_waypoint] * 3.6 * (1 - 0.1 * normalized_steer)
                 
                 if self.lattice_on: 
-                    self.target_velocity = self.target_velocity * normalized_warn * self.speed_adjust *0.7
+                    self.target_velocity = 20
                 else: 
                     self.target_velocity = self.target_velocity * normalized_warn * self.speed_adjust
 
@@ -241,9 +241,12 @@ class pure_pursuit:
         return current_waypoint
 
     def calc_pure_pursuit(self):
-        # 속도 비례 Look Ahead Distance 값 설정
-        self.lfd = (self.ego_vehicle_status.velocity.x) * 3.6 * self.lfd_gain
-        self.lfd = min(max(self.min_lfd, self.lfd), self.max_lfd)
+        if self.lattice_on: 
+            self.lfd = (self.ego_vehicle_status.velocity.x) * 3.6 * self.lfd_gain*0.2
+            self.lfd = min(max(self.min_lfd, self.lfd), self.max_lfd)
+        else:
+            self.lfd = (self.ego_vehicle_status.velocity.x) * 3.6 * self.lfd_gain
+            self.lfd = min(max(self.min_lfd, self.lfd), self.max_lfd)
         rospy.loginfo(self.lfd)
 
         vehicle_position = self.current_postion
@@ -269,7 +272,7 @@ class pure_pursuit:
 
             if local_path_point[0] > 0:
                 dis = sqrt(pow(local_path_point[0], 2) + pow(local_path_point[1], 2))
-                if dis >= self.lfd:
+                if 1.2*dis >= self.lfd:
                     self.forward_point = path_point
                     self.is_look_forward_point = True
                     break
@@ -283,8 +286,12 @@ class pure_pursuit:
     # Stanley 제어 알고리즘
     def calc_stanley(self):
         # 스탠리 제어 알고리즘을 차량의 앞바퀴 기준으로 수정
-        self.lfd = (self.ego_vehicle_status.velocity.x) * 3.6 * self.lfd_gain
-        self.lfd = min(max(self.min_lfd, self.lfd), self.max_lfd)
+        if self.lattice_on: 
+            self.lfd = (self.ego_vehicle_status.velocity.x) * 3.6 * self.lfd_gain*0.2
+            self.lfd = min(max(self.min_lfd, self.lfd), self.max_lfd)
+        else:
+            self.lfd = (self.ego_vehicle_status.velocity.x) * 3.6 * self.lfd_gain
+            self.lfd = min(max(self.min_lfd, self.lfd), self.max_lfd)
         rospy.loginfo(self.lfd)
         #stanley 동적 gain
         if len(self.path.poses) > 3:
@@ -331,7 +338,7 @@ class pure_pursuit:
                 dis = sqrt(pow(local_path_point[0], 2) + pow(local_path_point[1], 2))
 
                 # LFD 조건을 만족하는 포인트가 있으면 바로 사용
-                if dis >= self.lfd:
+                if 1.2* dis >= self.lfd :
                     self.forward_point = path_point
                     self.is_look_forward_point = True
                     break
@@ -343,9 +350,7 @@ class pure_pursuit:
 
         # LFD 조건을 만족하는 포인트가 없을 때, 가장 가까운 포인트 사용
         if not self.is_look_forward_point and closest_point is not None:
-            if self.mission_info.mission_num == 10: 
-                
-                
+            if self.mission_info.mission_num == 10:
                 self.forward_point = self.path.poses[-1].pose.position
                 self.is_look_forward_point = True
             else:    
@@ -383,7 +388,7 @@ class pure_pursuit:
         curvature = 1 / radius
         # 곡률 값에 상한선과 하한선 적용
         min_curvature = 0.001  # 최소 곡률 값 (직선에 가까운 경우)
-        max_curvature = 0.3    # 최대 곡률 값 (급격한 회전)
+        max_curvature = 0.5    # 최대 곡률 값 (급격한 회전)
 
         curvature = max(min_curvature, min(curvature, max_curvature))
         return curvature
@@ -394,13 +399,13 @@ class pure_pursuit:
         if speed == 0:
             speed_gain = 1.0
         else:
-            speed_gain = 1 / (speed + 1e-3)  # 속도가 클수록 스티어링 게인 낮아짐
+            speed_gain = 20 / (speed + 1e-3)  # 속도가 클수록 스티어링 게인 낮아짐
 
         curvature_gain = max_curvature  # 경로 상의 곡률에 따른 게인 조정
         k = 0.23 + (speed_gain * curvature_gain)
         
         # 게인의 상한/하한 설정
-        min_k = 0.15
+        min_k = 0.23
         max_k = 0.7
         k = np.clip(k, min_k, max_k)
         rospy.loginfo(f"현재 gain : {k}")
@@ -408,7 +413,7 @@ class pure_pursuit:
 
 class pidControl:
     def __init__(self):
-        self.p_gain = 0.30
+        self.p_gain = 0.32
         self.i_gain = 0.5
         self.d_gain = 0.016
         self.prev_error = 0
