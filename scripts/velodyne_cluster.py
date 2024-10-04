@@ -144,7 +144,7 @@ class SCANCluster:
         pc2_msg = pc2.create_cloud(header, fields, points_with_intensity)
 
         # PointCloud2 메시지 발행s
-        self.clusterpoints_pub.publish(pc2_msg)s
+        self.clusterpoints_pub.publish(pc2_msg)
 
     def pointcloud2_to_xyz(self, cloud_msg):
         point_list = []
