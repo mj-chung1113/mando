@@ -66,6 +66,11 @@ class pure_pursuit:
         self.stop_time = 0
         self.is_mission_end = False 
         self.lattice_on = False
+        
+        #새로 넣은 부분----------------------------------------------------
+        # 속도가 0인 상태에서 엑셀을 밟고 있는 시간 추적 변수
+        self.accel_stuck_start_time = None
+        self.is_accel_stuck = False
 
         # 전방 목표 지점과 현재 위치 저장 변수
         self.forward_point = Point()
@@ -79,7 +84,7 @@ class pure_pursuit:
         self.min_lfd = 5
         self.max_lfd = 40
         self.lfd_gain = 0.3
-        self.target_velocity = 40  # 차량의 한계속도. 수정 필요, 구간에 따라 동적으로 조절할 예정 
+        self.target_velocity = 45  # 차량의 한계속도. 수정 필요, 구간에 따라 동적으로 조절할 예정 
 
         self.pid = pidControl()
         self.vel_planning = velocityPlanning(self.target_velocity / 3.6, 0.4)  # km/h -> m/s 변환
@@ -92,6 +97,15 @@ class pure_pursuit:
                 # 곡률 기반 속도 계획을 반복적으로 실행, 현재 위치와 차량 헤딩 정보를 전달
                 self.velocity_list = self.vel_planning.curvedBaseVelocity(self.path, 15, self.current_postion, self.vehicle_yaw)
                 
+                 #새로 넣은 부분 ------------------------------
+                # 엑셀을 밟고 있으나 속도가 0인 상태를 확인
+                self.check_acceleration_stuck()
+
+                # 후진 중일 때는 다른 로직을 수행하지 않음
+                if self.is_accel_stuck:
+                    continue
+                #----------------------------------------
+
                 if self.ego_vehicle_status.velocity.x * 3.6 <= 5:
                     # Pure Pursuit 사용
                     steering = self.calc_pure_pursuit()
@@ -101,12 +115,12 @@ class pure_pursuit:
 
                 self.current_waypoint = self.get_current_waypoint(self.path)
                 normalized_steer = abs(self.ctrl_cmd_msg.steering) / 0.6981
-                normalized_warn = 1-0.30 * self.warn_signal * self.warn_signal
+                normalized_warn = 1-0.37 * self.warn_signal * self.warn_signal
                 self.speed_adjust = 1 - 0.1 * self.speed_adjust_factor * self.speed_adjust_factor
                 self.target_velocity = self.velocity_list[self.current_waypoint] * 3.6 * (1 - 0.1 * normalized_steer)
                 
                 if self.lattice_on: 
-                    self.target_velocity = 20
+                    self.target_velocity = 20 * (1 - 0.11 * normalized_steer)*normalized_warn
                 else: 
                     self.target_velocity = self.target_velocity * normalized_warn * self.speed_adjust
 
@@ -154,12 +168,12 @@ class pure_pursuit:
                     output = self.pid.pid(self.target_velocity, self.ego_vehicle_status.velocity.x * 3.6)
                     if output > 0.0:
                         self.ctrl_cmd_msg.accel = output
-                        rospy.loginfo(f"Acceleration: {output}")
+                        #rospy.loginfo(f"Acceleration: {output}")
                         self.ctrl_cmd_msg.brake = 0.0
                     else:
                         self.ctrl_cmd_msg.accel = 0.0
                         self.ctrl_cmd_msg.brake = -output
-                        rospy.loginfo(f"Brake: {output}")
+                        #rospy.loginfo(f"Brake: {output}")
 
                     self.ctrl_cmd_pub.publish(self.ctrl_cmd_msg)
                     self.lfd_pub.publish(self.lfd)
@@ -181,8 +195,6 @@ class pure_pursuit:
     def status_callback(self, msg):
         self.ego_vehicle_status = msg  # EgoVehicleStatus 업데이트    
         self.is_status = True
-    
-    #mission number 수신용 콜백함수 
     def mission_callback(self, msg):
         try:
             self.mission_info = msg
@@ -192,18 +204,96 @@ class pure_pursuit:
                 self.is_mission_end = False
         except ValueError as e:
             rospy.logerr(f"Invalid driving mode value: {self.mission_info.mission_num}")
-
     def stop_callback(self,msg):
         self.stop_signal = msg.data
     def warn_callback(self,msg):
         self.warn_signal = msg.data 
-
     def speed_adjust_callback(self, msg):
         self.speed_adjust_factor = msg.data
-        rospy.loginfo(f"속도 조정 신호 수신: 속도를 {self.speed_adjust_factor * 100:.0f}%로 조정합니다.")
+        
     def lattice_on_callback(self, msg):
         self.lattice_on = msg.data
- 
+    def check_acceleration_stuck(self):
+        if self.mission_info.mission_num not in [2,6] and self.ctrl_cmd_msg.accel > 0.8 and self.ego_vehicle_status.velocity.x < 0.1:
+            
+            rospy.loginfo("충돌감지&&&&&&&&&&&&&&&&&&&&&&&&&&&&&.")
+            if self.accel_stuck_start_time is None:
+                # 엑셀을 밟기 시작하면서 속도가 0인 경우 시간 기록 시작
+                self.accel_stuck_start_time = rospy.Time.now()
+                
+            else:
+                elapsed_time = rospy.Time.now() - self.accel_stuck_start_time
+                rospy.loginfo(f"elapsed_time = {elapsed_time}")
+                if elapsed_time.to_sec() > 4.0 and not self.is_accel_stuck:
+                    rospy.logwarn("Acceleration stuck detected. Changing gear to R for 1 second.")
+                    
+                    self.change_gear_to_r()
+                    
+                    self.is_accel_stuck = True
+                    self.ctrl_cmd_msg.accel = 0.3
+                    self.ctrl_cmd_msg.brake = 0.0
+                    # 기존 조향각의 부호를 반대로 변경하여 후진 시 사용
+                    self.ctrl_cmd_msg.steering = -0.5*self.ctrl_cmd_msg.steering
+                    self.ctrl_cmd_msg.accel = 0.3  # 후진을 위해 엑셀을 설정
+                    self.ctrl_cmd_msg.brake = 0.0
+                    
+                    self.ctrl_cmd_pub.publish(self.ctrl_cmd_msg)
+                    rospy.sleep(2)  # 후진을 1초간 유지
+
+                    # 브레이크를 밟아 후진 속도를 0으로 만듦
+                    self.ctrl_cmd_msg.accel = 0.0
+                    self.ctrl_cmd_msg.brake = 1.0
+                    self.ctrl_cmd_pub.publish(self.ctrl_cmd_msg)
+                    rospy.sleep(2)  # 속도를 0으로 만드는 시간을 줌
+                    rospy.logwarn("dddddddddddddddddddddddddddddddddddddd.")
+                    self.change_gear_to_d()  # D 기어로 변경
+                    
+                    self.is_accel_stuck = False
+                    self.accel_stuck_start_time = None
+        else:
+            self.accel_stuck_start_time = None
+            self.is_accel_stuck = False  # 엑셀을 밟고 있지만 속도가 0이 아닌 경우 상태 초기화
+
+
+
+    def change_gear_to_r(self):
+        """기어를 R단으로 변경"""
+    
+        try:
+            gear_cmd = MoraiEventCmdSrvRequest()
+            gear_cmd.request.option = 3  # 기어 변경 옵션
+            gear_cmd.request.ctrl_mode = 3  # 제어 모드 설정 (기어 변경 제어)
+            gear_cmd.request.gear = Gear.R.value  # R 기어로 변경
+
+            response = self.gear_change_service(gear_cmd)
+
+            if response.response.gear == Gear.R.value:
+                rospy.loginfo("기어가 R단으로 변경되었습니다.")
+                
+            else:
+                rospy.logerr("기어를 R단으로 변경하는데 실패했습니다.")
+        except rospy.ServiceException as e:
+            rospy.logerr(f"기어 변경 서비스 호출 실패: {e}")
+
+    def change_gear_to_d(self):
+        """기어를 D단으로 변경"""
+        if self.is_accel_stuck:
+            try:
+                gear_cmd = MoraiEventCmdSrvRequest()
+                gear_cmd.request.option = 3  # 기어 변경 옵션
+                gear_cmd.request.ctrl_mode = 3  # 제어 모드 설정 (기어 변경 제어)
+                gear_cmd.request.gear = Gear.D.value  # D 기어로 변경
+
+                response = self.gear_change_service(gear_cmd)
+
+                if response.response.gear == Gear.D.value:
+                    rospy.loginfo("기어가 D단으로 변경되었습니다.")
+
+                else:
+                    rospy.logerr("기어를 D단으로 변경하는데 실패했습니다.")
+            except rospy.ServiceException as e:
+                rospy.logerr(f"기어 변경 서비스 호출 실패: {e}")
+
     def change_gear_to_p(self):
         """기어를 P단으로 변경"""
         try:
@@ -221,7 +311,6 @@ class pure_pursuit:
                 rospy.logerr("기어를 P단으로 변경하는데 실패했습니다.")
         except rospy.ServiceException as e:
             rospy.logerr(f"기어 변경 서비스 호출 실패: {e}")
-
     def get_current_waypoint(self, path):
         min_dist = float('inf')        
         current_waypoint = -1
@@ -399,7 +488,7 @@ class pure_pursuit:
         if speed == 0:
             speed_gain = 1.0
         else:
-            speed_gain = 20 / (speed + 1e-3)  # 속도가 클수록 스티어링 게인 낮아짐
+            speed_gain = 30 / (speed + 1e-3)  # 속도가 클수록 스티어링 게인 낮아짐
 
         curvature_gain = max_curvature  # 경로 상의 곡률에 따른 게인 조정
         k = 0.23 + (speed_gain * curvature_gain)
@@ -476,11 +565,11 @@ class velocityPlanning:
 
             # 각도 차이에 따라 속도 계획 (단위: m/s)
             if heading_error > pi / 6:  # 각도 차이가 30도 이상일 때
-                v_max = self.car_max_speed * 0.65  
+                v_max = self.car_max_speed * 0.7  
             elif  pi / 6 >= heading_error > pi / 9:  # 각도 차이가 20도 이상일 때
-                v_max = self.car_max_speed * 0.75  
+                v_max = self.car_max_speed * 0.82  
             elif pi / 9 >= heading_error > pi / 12:  # 각도 차이가 15도 이상일 때
-                v_max = self.car_max_speed * 0.85  
+                v_max = self.car_max_speed * 0.9  
             elif pi / 12>= heading_error > pi / 20:  # 각도 차이가 9도 이상일 때
                 v_max = self.car_max_speed * 0.95 
             else:

@@ -54,8 +54,8 @@ class LatticePlanner:
             -1*base_offset + step_size * 1.2,
             -1*base_offset + step_size * 2.4,
             -1*base_offset + step_size * 3.6,
-            -1*base_offset + step_size * 4.8,
-             base_offset - (step_size * 4.8),
+            -1*base_offset + step_size * 4.9,
+             base_offset - (step_size * 4.9),
             base_offset - (step_size * 3.6),
             base_offset - (step_size * 2.4),
             base_offset - (step_size * 1.2),
@@ -148,7 +148,7 @@ class LatticePlanner:
 
     def checkObject(self, ref_path, object_points):
         is_crash = False
-        path_length_limit = max(5, int(len(ref_path.poses) * (2.0 / 3.0)))  # 경로의 3분의 2 지점까지만 확인
+        path_length_limit = max(10, int(len(ref_path.poses) * (2.0 / 3.0)))  # 경로의 3분의 2 지점까지만 확인
         path_length_unlimit = max(5, int(len(ref_path.poses) * (1.0 / 6.0)))
 
         # 차량의 현재 위치
@@ -174,35 +174,50 @@ class LatticePlanner:
             is_crash = self.generateAdjustedPathAndCheck(object_points)
 
         return is_crash
+    
     def generateAdjustedPathAndCheck(self, object_points):
         is_crash = False
         adjusted_path = Path()
         adjusted_path.header.frame_id = '/map'
 
-        # 차량의 현재 위치
+        # 차량의 현재 위치와 헤딩 계산
         ego_x = self.odom_msg.pose.pose.position.x
         ego_y = self.odom_msg.pose.pose.position.y
+        orientation = self.odom_msg.pose.pose.orientation
+        heading = atan2(2.0 * (orientation.w * orientation.z + orientation.x * orientation.y),
+                        1.0 - 2.0 * (orientation.y**2 + orientation.z**2))
+
+        # 차량의 현재 위치를 헤딩 방향으로 1미터 앞으로 보정
+        adjusted_ego_x = ego_x + cos(heading) * 1.0
+        adjusted_ego_y = ego_y + sin(heading) * 1.0
 
         # 로컬 경로의 첫 번째 점과 차량의 y좌표 차이 계산
         closest_point = self.local_path.poses[0].pose.position
-        y_offset = closest_point.y - ego_y
+        x_offset = closest_point.x - adjusted_ego_x
+        y_offset = closest_point.y - adjusted_ego_y 
 
         # y_offset을 반영한 새로운 경로 생성
         for pose in self.local_path.poses:
             new_pose = PoseStamped()
-            new_pose.pose.position.x = pose.pose.position.x
+            new_pose.pose.position.x = pose.pose.position.x - x_offset
             new_pose.pose.position.y = pose.pose.position.y - y_offset  # y좌표 차이만큼 경로를 이동
             new_pose.pose.position.z = pose.pose.position.z
             new_pose.pose.orientation = pose.pose.orientation
             adjusted_path.poses.append(new_pose)
 
+        # 경로의 3분의 2 지점까지만 확인
+        path_length_limit = max(10, int(len(adjusted_path.poses) * (2.0 / 3.0)))
+        
+
         # 생성된 경로에 대해 장애물 충돌 확인
         for point in object_points:
-            for path_pose in adjusted_path.poses:
+            # 경로의 3분의 2 지점까지만 확인
+            for i in range(path_length_limit):
+                path_pose = adjusted_path.poses[i]
                 dis = sqrt(pow(path_pose.pose.position.x - point[0], 2) + pow(path_pose.pose.position.y - point[1], 2))
-                
+
                 # 장애물이 경로 근처에 있으면 충돌로 간주
-                if dis < self.checkObject_dis:
+                if dis < 1.8:
                     is_crash = True
                     break
 
@@ -213,7 +228,7 @@ class LatticePlanner:
 
     def collision_check(self, object_points, out_path):
         selected_lane = 12
-        self.lane_weight = [120, 100, 80, 70,4,4, 5, 10, 20, 30]  # 초기 레인별 가중치
+        self.lane_weight = [120, 100, 80, 60, 1, 3, 5, 10, 20, 21]  # 초기 레인별 가중치
         max_weight = 10000  # 최대 가중치
 
         for point in object_points:
@@ -221,16 +236,18 @@ class LatticePlanner:
                 for path_pos in out_path[path_num].poses:
                     dis = sqrt(pow(point[0] - path_pos.pose.position.x, 2) + pow(point[1] - path_pos.pose.position.y, 2))
 
-                    if 2.0 < dis < 2.5:
+                    if 2.0 <= dis < 2.5:
                         self.lane_weight[path_num] += 1
-                    elif 1.5 < dis < 2.0:
-                        self.lane_weight[path_num] += 5
-                    elif 1.25 < dis < 1.5:
+                    elif 1.5 <= dis < 2.0:
+                        self.lane_weight[path_num] += 3
+                    elif 1.25 <= dis < 1.5:
                         self.lane_weight[path_num] += 14
-                    elif 1.0 < dis < 1.25:
-                        self.lane_weight[path_num] += 21
-                    elif dis < 1.0:
-                        self.lane_weight[path_num] += 40
+                    elif 1.0 <= dis < 1.25:
+                        self.lane_weight[path_num] += 25
+                    elif 0.5<= dis < 1.0:
+                        self.lane_weight[path_num] += 37
+                    elif dis < 0.5:
+                        self.lane_weight[path_num] += 49
                     #else:
                     #    self.lane_weight[path_num] -= 1
                     self.lane_weight[path_num] = min(max_weight, self.lane_weight[path_num])
@@ -245,23 +262,21 @@ class LatticePlanner:
 
     def return_collision_check(self, object_points, out_path):
         selected_lane = 12
-        self.return_weight = [61, 45, 30, 10,5,5, 10, 30, 45, 60]
+        self.return_weight = [62, 45, 30, 10, 3, 5, 10, 30, 45, 60]
         max_weight = 10000
         for point in object_points:
             for path_num in range(len(out_path)):
                 for path_pos in out_path[path_num].poses:
                     dis = sqrt(pow(point[0] - path_pos.pose.position.x, 2) + pow(point[1] - path_pos.pose.position.y, 2))
 
-                    if 2.0 < dis < 2.5:
-                        self.lane_weight[path_num] += 1
-                    elif 1.5 < dis < 2.0:
-                        self.lane_weight[path_num] += 5
-                    elif 1.25 < dis < 1.5:
-                        self.lane_weight[path_num] += 14
-                    elif 1.0 < dis < 1.25:
-                        self.lane_weight[path_num] += 21
-                    elif dis < 1.0:
-                        self.lane_weight[path_num] += 40
+                    if 1.25 <= dis < 1.5:
+                        self.lane_weight[path_num] += 16
+                    elif 1.0 <= dis < 1.25:
+                        self.lane_weight[path_num] += 25
+                    elif 0.5<= dis < 1.0:
+                        self.lane_weight[path_num] += 37
+                    elif dis < 0.5:
+                        self.lane_weight[path_num] += 49
                     #else:
                     #    self.lane_weight[path_num] -= 1
                     self.lane_weight[path_num] = min(max_weight, self.lane_weight[path_num])
@@ -403,7 +418,7 @@ class LatticePlanner:
         8프레임 중 3프레임에서 장애물이 발견되면 정적 장애물로 간주.
         """
         static_objects = []
-        threshold_distance = 0.8  # 동적/정적 객체를 구분할 거리 기준
+        threshold_distance = 0.6  # 동적/정적 객체를 구분할 거리 기준
         required_frames = 3  # 정적 장애물로 간주하기 위한 최소 프레임 수
         max_track_frames = 8  # 추적할 최대 프레임 수
 
@@ -513,14 +528,18 @@ class LatticePlanner:
 
         rel_x = cos(heading) * (closest_x - start_x) + sin(heading) * (closest_y - start_y)
         rel_y = -sin(heading) * (closest_x - start_x) + cos(heading) * (closest_y - start_y)
-
-        # y 오차가 10m 이상일 경우 경로 생성 중단, end_pose까지 직선 경로 설정
-        if abs(rel_y) > 10.0:
+        # 기존 경로 생성 로직 (y 오차가 10m 이하일 경우 계속)
+        offset = 0.3  # 오차를 얼마나 반영할지 결정하는 계수 (필요시 조정 가능)
+        offset_value_x = rel_x * offset
+        offset_value_y = rel_y * offset  # y 오차에 비례하여 보정 값 설정
+        
+        # y 오차가 9.8m 이상일 경우 경로 생성 중단, end_pose까지 직선 경로 설정
+        if abs(rel_y) > 9.8:
             rospy.logwarn("Y error exceeds 10 meters! Stopping path generation and using end_pose only.")
 
             # end_pose를 헤딩 방향으로 설정
-            end_x = ego_x + (min(max(2.0 * self.lfd, 20.0), 50.0)) * cos(heading)
-            end_y = ego_y + (min(max(2.0 * self.lfd, 20.0), 50.0)) * sin(heading)
+            end_x = ego_x + (min(max(1.8 * self.lfd, 18.0), 40.0)) * cos(heading)
+            end_y = ego_y + (min(max(1.8 * self.lfd, 18.0), 40.0)) * sin(heading)
 
             # 직선 경로 생성
             lattice_path = Path()
@@ -544,30 +563,28 @@ class LatticePlanner:
 
             return out_path  # 즉시 직선 경로 반환
 
-        # 기존 경로 생성 로직 (y 오차가 10m 이하일 경우 계속)
-        offset = 0.2  # 오차를 얼마나 반영할지 결정하는 계수 (필요시 조정 가능)
-        offset_value = rel_y * offset  # y 오차에 비례하여 보정 값 설정
+        
 
         if abs(rel_y) >= self.hderr_threshold:
-            heading_end_x = ego_x + (min(max(2.0 * self.lfd, 20.0), 50.0)) * cos(heading)
-            heading_end_y = ego_y + (min(max(2.0 * self.lfd, 20.0), 50.0)) * sin(heading)
+            heading_end_x = ego_x + (min(max(1.7 * self.lfd, 17.0), 40.0)) * cos(heading)
+            heading_end_y = ego_y + (min(max(1.7 * self.lfd, 17.0), 40.0)) * sin(heading)
 
             if len(self.local_path.poses) > 0:
-                local_lfd_index = min(len(self.local_path.poses) - 1, int(min(max(3.0 * self.lfd, 20.0), 50.0)))
+                local_lfd_index = min(len(self.local_path.poses) - 1, int(min(max(2.0 * self.lfd, 20.0), 50.0)))
                 local_end_x = self.local_path.poses[local_lfd_index].pose.position.x
                 local_end_y = self.local_path.poses[local_lfd_index].pose.position.y
             else:
                 rospy.logwarn("Local path is empty.")
                 return out_path
 
-            end_x = (heading_end_x + local_end_x) / 2.0
-            end_y = (heading_end_y + local_end_y) / 2.0 + offset_value
+            end_x = (heading_end_x + local_end_x) / 2.0 +offset_value_x
+            end_y = (heading_end_y + local_end_y) / 2.0 + offset_value_y
         else:
             if len(self.local_path.poses) > 0:
-                heading_end_x = ego_x + (min(max(2.0 * self.lfd, 20.0), 50.0)) * cos(heading)
-                heading_end_y = ego_y + (min(max(2.0 * self.lfd, 20.0), 50.0)) * sin(heading)
-                end_x = heading_end_x
-                end_y = heading_end_y + offset_value
+                heading_end_x = ego_x + (min(max(1.7 * self.lfd, 17.0), 40.0)) * cos(heading)
+                heading_end_y = ego_y + (min(max(1.7 * self.lfd, 17.0), 40.0)) * sin(heading)
+                end_x = heading_end_x + offset_value_x
+                end_y = heading_end_y + offset_value_y
             else: 
                 heading_end_x = ego_x + 5 * cos(heading)
                 heading_end_y = ego_y + 5 * sin(heading)
@@ -621,8 +638,8 @@ class LatticePlanner:
             a = [0.0, 0.0, 0.0, 0.0]
             a[0] = ps
             a[1] = 0
-            a[2] = 7.4 * (pf - ps) / (xf * xf)
-            a[3] = -6.9 * (pf - ps) / (xf * xf * xf)
+            a[2] = 6.4 * (pf - ps) / (xf * xf)
+            a[3] = -5.9 * (pf - ps) / (xf * xf * xf)
 
             for i in x:
                 result = a[3] * i * i * i + a[2] * i * i + a[1] * i + a[0]

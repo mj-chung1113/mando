@@ -27,12 +27,13 @@ class SCANCluster:
         self.pc_np[:, 3] = self.pc_np[:, 3] / 510  # intensity가 4번째 컬럼에 있음
 
         # Z 좌표를 0으로 조정 
-        #self.pc_np[:, 2] = self.pc_np[:, 2] * 0.2
- 
+        self.pc_np[:, 2] = self.pc_np[:, 2] * 0.2
+    
         # 3. 거리별로 클러스터링 수행 (xyz + intensity 기반)
         cluster_points = []
-        cluster_intensity_averages = [] #디버깅 
+        cluster_intensity_averages = []  # 디버깅용
         self.min_distance = float('inf')  # 각 콜백마다 최소 거리 초기화
+        closest_cluster_intensity = None  # 가장 가까운 클러스터의 intensity를 저장할 변수
 
         for dist_range, params in self.get_dbscan_params_by_distance().items():
             # 해당 거리 범위의 포인트 필터링
@@ -53,8 +54,18 @@ class SCANCluster:
                 c_xyz_mean = np.mean(c_points[:, :3], axis=0)  # xyz 좌표 평균
                 c_intensity_mean = np.mean(c_points[:, 3])  # intensity 평균 (스케일링된 값)
 
-                cluster_points.append([c_xyz_mean[0], c_xyz_mean[1], c_xyz_mean[2]])  # xyz 좌표 포함
+                cluster_points.append([c_xyz_mean[0], c_xyz_mean[1], c_xyz_mean[2], c_intensity_mean])
                 cluster_intensity_averages.append(c_intensity_mean)  # intensity 평균 저장
+
+                # 가장 가까운 클러스터의 거리를 계산
+                cluster_distance = np.sqrt(c_xyz_mean[0]**2 + c_xyz_mean[1]**2)  # x, y 좌표 기반으로 거리 계산
+                if cluster_distance < self.min_distance:
+                    self.min_distance = cluster_distance
+                    closest_cluster_intensity = c_intensity_mean  # 가장 가까운 클러스터의 intensity 저장
+
+        # 가장 가까운 클러스터의 스케일링된 intensity 출력
+        if closest_cluster_intensity is not None:
+            rospy.loginfo(f"Closest Cluster Intensity (scaled): {closest_cluster_intensity}")
 
         # 차량 전방 20미터 이내 클러스터의 경고 신호 계산 및 퍼블리시
         self.calculate_warn_signal(cluster_points)
@@ -71,37 +82,43 @@ class SCANCluster:
         각도가 0도에 가까울수록 warn 값을 높인다. 거리가 3.33미터에 가까울수록 warn 값이 1에 가깝고,
         21.33미터에 가까울수록 warn 값을 낮춘다. 3.33미터보다 가까운 경우 warn 값은 1이다.
         """
-        
-        #self.warn = 0.0
-
         for point in cluster_points:
-            x, y, z = point
+            # 클러스터 포인트에는 [x, y, z, intensity] 네 개의 값이 저장되어 있음
+            x, y, z, intensity = point
             distance = np.sqrt(x**2 + y**2)
 
-            if 40 >x > 0 and -3.5 < y < 3.5 and -1.40 < z  and distance < 40:  # 전방이고 21.33m 이내
+            # 빨간색에 해당하는 intensity 범위 설정 (예: 스케일링된 값이 0.6~0.8 사이)
+            is_red_intensity = 0.168 <= intensity <= 0.188
+            is_box_intensity = 0.091 <= intensity <= 0.12
+            is_poll_intensity =  0.022 <= intensity <= 0.045 
+            is_road_intensity = 0.045 < intensity <= 0.051
+            is_baricade_intensity = 0.099 < intensity <= 0.11
+            if 40 > x > 0 and -3.0 < y < 3.0 and -1.40 * 0.2 < z and distance < 40 or is_box_intensity or is_red_intensity:
                 angle = abs(np.arctan2(y, x))  # 차량 전방과의 각도 (라디안)
                 angle_scale = max(0, 1 - (angle / (np.pi / 3)))  # ±60도 기준으로 스케일링
 
                 # 거리가 3.33 미터보다 가까운 경우 warn을 1로 설정
-                if distance <= 10:
+                if distance <= 11:
                     distance_scale = 1
                 else:
                     # 거리는 3.33m에서 21.33m로 스케일링. 가까울수록 warn이 1, 멀수록 0
-                    distance_scale =  min(1.00,max(0.001, 1 - ((distance - 10) / (40 - 10))))
+                    distance_scale = min(1.00, max(0.001, 1 - ((distance - 11) / (40 - 11))))
 
-                # 각도와 거리 스케일링을 곱하여 warn 값을 계산
-                current_warn = angle_scale * distance_scale
+                #  각도/거리 조건 만족 시 경고 신호
+                if  (angle_scale * distance_scale) > self.warn :
+                    self.warn = max(self.warn, angle_scale * distance_scale)
+                    if is_box_intensity or is_red_intensity or is_baricade_intensity: 
+                        self.warn = min(1.0,self.warn*1.2)
 
-                # 최대 warn 값을 업데이트
-                if current_warn > self.warn:
-                    self.warn = current_warn
+                    elif is_poll_intensity:
+                        self.warn = self.warn*0.5
+                    elif is_road_intensity:
+                        self.warm = self.warn*0.1
 
         # 최대 warn 값 퍼블리시
-        
         self.warn_pub.publish(Float32(self.warn))
         rospy.loginfo(f"Warn signal: {self.warn}")
-        self.warn = min(1,max(0.0001,0.83 *self.warn))
-        
+        self.warn = min(1, max(0.0001, 0.83 * self.warn))
 
     def remove_noise_by_intensity(self, points, noise_threshold=0.1):
         """
@@ -118,10 +135,10 @@ class SCANCluster:
         """
         return {
             (2, 5): {'eps': 0.1, 'min_samples': 20},
-            (5, 10): {'eps': 0.15, 'min_samples': 12},  # intensity 포함 -> eps 값 조정
-            (10, 20): {'eps': 0.34, 'min_samples': 9},
-            (20, 30): {'eps': 0.43, 'min_samples': 7},
-            (30, 40): {'eps': 0.47, 'min_samples': 5},
+            (5, 9): {'eps': 0.19, 'min_samples': 11},  # intensity 포함 -> eps 값 조정
+            (9, 19): {'eps': 0.34, 'min_samples': 9},
+            (19, 29): {'eps': 0.43, 'min_samples': 7},
+            (29, 45): {'eps': 0.47, 'min_samples': 5},
         }
 
     def publish_point_cloud(self, points, intensity_averages):
@@ -153,7 +170,7 @@ class SCANCluster:
             angle = np.arctan2(point[1], point[0])
 
             # point[0] = x / point[1] = y / point[2] = z / point[3] = intensity
-            if -0.5 < point[0] < 45 and -10 < point[1] < 10 and (0.5 < dist < 45) and (-1.50 < point[2] < 0.4):
+            if -0.5 < point[0] < 45 and -10 < point[1] < 10 and (0.5 < dist < 45) and (-1.48 < point[2] < 0.2):
                 point_list.append((point[0], point[1], 0, point[3], dist, angle))
 
         point_np = np.array(point_list, np.float32)

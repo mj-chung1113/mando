@@ -43,7 +43,7 @@ class MissionNode:
             {'mission_number': 3, 'x': 522.4193726097001, 'y': -416.7451800466515, 'def_speed' : 40},
             {'mission_number': 4, 'x': 272.35897832305636, 'y': -220.1035174508579, 'def_speed' : 20},
             {'mission_number': 5, 'x': 270.2570496122935, 'y': -180.44499389035627, 'def_speed' : 40},
-            {'mission_number': 6, 'x': 328.6751709495438, 'y': -109.87042419053614, 'def_speed' : 10},
+            {'mission_number': 6, 'x': 333.8651428737794, 'y': -100.82481566723436, 'def_speed' : 10},
             {'mission_number': 7, 'x': 340.4031982940505, 'y': -92.36979857739061, 'def_speed' : 40},
             {'mission_number': 8, 'x': 413.37670903489925, 'y': -7.062285822350532, 'def_speed' : 10},
             {'mission_number': 9, 'x': 443.4772034197813, 'y': 3.4307762002572417, 'def_speed' : 40},
@@ -51,7 +51,7 @@ class MissionNode:
             
         ]
 
-        rate = rospy.Rate(30)  # 15hz
+        rate = rospy.Rate(30)  # 15hzsss
         while not rospy.is_shutdown():
             self.update_mission()
             self.mission_pub.publish(self.mission_info)

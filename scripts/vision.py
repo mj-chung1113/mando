@@ -307,9 +307,7 @@ class YoloNode:
             # 신호등 검출 및 색상 분석
             self.detect_traffic_light_color(roi)
             # OpenCV 창에 이미지 표시
-            cv2.imshow("YOLO & Collision Detection with ROIs", frame)
-            cv2.waitKey(1)
-
+            
 def main():
     yolo_node = YoloNode()
     try:
